@@ -51,9 +51,16 @@ print('PASSWORD_SETUP_AND_REUSE_OK', flush=True)
                 os.close(read_fd)
                 os.execv(sys.executable, [sys.executable, '-c', script])
             output, sent, status = b'', 0, None
-            prompts = [(b'Panel login ', b'admin-tty\n'),
-                       (b'Panel password (at least 16 characters): ', password.encode() + b'\n'),
+            # Exercise invalid login, excess Backspace at the field boundary,
+            # short password, mismatch, then a corrected hidden password.
+            prompts = [(b'Panel login ', b'x\n'),
+                       (b'Please try again.', b'\x7f\x7fadmin-ttx\x7fy\n'),
+                       (b'Panel password (at least 16 characters): ', b'short\n'),
+                       (b'Password length must be', password.encode() + b'\n'),
+                       (b'Repeat password: ', b'wrong-confirmation\n'),
+                       (b'Passwords do not match.', password[:-1].encode() + b'x\x7f' + password[-1:].encode() + b'\n'),
                        (b'Repeat password: ', password.encode() + b'\n')]
+            consumed = 0
             deadline = time.monotonic() + 15
             try:
                 while time.monotonic() < deadline:
@@ -65,9 +72,21 @@ print('PASSWORD_SETUP_AND_REUSE_OK', flush=True)
                         if not chunk:
                             break
                         output += chunk
-                    if sent < len(prompts) and prompts[sent][0] in output:
-                        os.write(fd, prompts[sent][1])
-                        sent += 1
+                    if sent < len(prompts):
+                        found = output.find(prompts[sent][0], consumed)
+                        if found >= 0:
+                            # Wait for the next complete password prompt before
+                            # typing, after getpass has disabled terminal echo.
+                            end = found + len(prompts[sent][0])
+                            if sent in (1, 3, 5):
+                                next_prompt = b'Panel login ' if sent == 1 else b'Panel password (at least 16 characters): '
+                                marker = output.find(next_prompt, end)
+                                if marker < 0:
+                                    continue
+                                end = marker + len(next_prompt)
+                            os.write(fd, prompts[sent][1])
+                            consumed = end
+                            sent += 1
                 result, status = os.waitpid(pid, os.WNOHANG)
                 if not result:
                     os.kill(pid, signal.SIGKILL)
@@ -75,7 +94,7 @@ print('PASSWORD_SETUP_AND_REUSE_OK', flush=True)
                 self.assertEqual(os.waitstatus_to_exitcode(status), 0, output.decode(errors='replace'))
                 self.assertIn(b'PASSWORD_SETUP_AND_REUSE_OK', output)
                 self.assertNotIn(password.encode(), output, 'Terminal echoed the password')
-                self.assertEqual(sent, 3)
+                self.assertEqual(sent, len(prompts))
             finally:
                 if status is None:
                     result, _ = os.waitpid(pid, os.WNOHANG)

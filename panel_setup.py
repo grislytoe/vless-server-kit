@@ -21,15 +21,33 @@ def read_credentials():
     # which requires seeking; separate read/write streams work with terminals.
     with open('/dev/tty', 'r', encoding='utf-8') as tty_in, \
             open('/dev/tty', 'w', encoding='utf-8') as tty_out:
-        tty_out.write('Panel login (3–40 letters/digits/_/-): ')
-        tty_out.flush()
-        username = tty_in.readline().strip()
-        if not re.fullmatch(r'[A-Za-z0-9_-]{3,40}', username):
-            raise SystemExit('Invalid login.')
-        password = getpass.getpass('Panel password (at least 16 characters): ', stream=tty_out)
-        confirmation = getpass.getpass('Repeat password: ', stream=tty_out)
-    if len(password) < 16 or len(password) > 256 or password != confirmation:
-        raise SystemExit('Passwords must match and contain 16–256 characters.')
+        # Readline edits only the current input, with arrows/Home/Backspace.
+        import readline  # noqa: F401 -- enables the standard input line editor
+        saved_in, saved_out = os.dup(0), os.dup(1)
+        try:
+            os.dup2(tty_in.fileno(), 0)
+            os.dup2(tty_out.fileno(), 1)
+            while True:
+                username = input('Panel login (3–40 letters/digits/_/-): ').strip()
+                if re.fullmatch(r'[A-Za-z0-9_-]{3,40}', username):
+                    break
+                print('Invalid login: use 3–40 letters/digits/_/-. Please try again.')
+        finally:
+            os.dup2(saved_in, 0)
+            os.dup2(saved_out, 1)
+            os.close(saved_in)
+            os.close(saved_out)
+        while True:
+            password = getpass.getpass('Panel password (at least 16 characters): ', stream=tty_out)
+            if not 16 <= len(password) <= 256:
+                tty_out.write('Password length must be 16–256 characters. Please try again.\n')
+                tty_out.flush()
+                continue
+            confirmation = getpass.getpass('Repeat password: ', stream=tty_out)
+            if password == confirmation:
+                break
+            tty_out.write('Passwords do not match. Enter the password twice again.\n')
+            tty_out.flush()
     return username, password
 
 

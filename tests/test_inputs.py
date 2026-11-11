@@ -47,7 +47,7 @@ printf '\nRESULT:%s|%s|%s\n' "$DOMAIN" "$INBOUND" "$OUTBOUND"
                         break
                     output += chunk
                 if b'Domain (e.g.' in output and not sent:
-                    os.write(fd, b'new-vpn.example.com\n198.51.100.10\n198.51.100.11\n')
+                    os.write(fd, b'\x7f\x7fbad..domain\nnew-vpn.example.com\n999.1.1.1\n198.51.100.10\n198.51.100.10\n198.51.100.11\n')
                     sent = True
                 result, status = os.waitpid(pid, os.WNOHANG)
                 if result:
