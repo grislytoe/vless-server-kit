@@ -1,0 +1,22 @@
+[Unit]
+Description=VPN local key manager
+After=xray.service
+Wants=xray.service
+[Service]
+User=root
+Group=vless-admin
+ExecStart=/usr/bin/python3 /opt/vless-optimized/admin.py serve
+Restart=on-failure
+RestartSec=2
+RuntimeDirectory=vless-admin
+RuntimeDirectoryMode=0750
+UMask=0007
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/vless-optimized /usr/local/etc/xray /run/lock
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
+[Install]
+WantedBy=multi-user.target

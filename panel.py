@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""Unprivileged admin UI, published only through the local Nginx TLS fallback."""
+from collections import OrderedDict, deque
+from datetime import timedelta
+from functools import wraps
+import hmac
+import io
+import json
+from pathlib import Path
+import secrets
+import socket
+import threading
+import time
+import uuid
+
+from flask import Flask, abort, flash, redirect, render_template, request, send_file, session, url_for
+from panel_setup import password_hash
+
+
+def rpc(message):
+    with socket.socket(socket.AF_UNIX) as conn:
+        conn.settimeout(65)
+        conn.connect('/run/vless-admin/control.sock')
+        conn.sendall(json.dumps(message).encode() + b'\n')
+        raw = conn.makefile('rb').readline(2_000_001)
+    if len(raw) > 2_000_000:
+        raise RuntimeError('Response too large.')
+    result = json.loads(raw)
+    if 'error' in result:
+        raise RuntimeError(result['error'])
+    return result['result']
+
+
+class LoginLimiter:
+    def __init__(self):
+        self.entries, self.lock = OrderedDict(), threading.Lock()
+
+    def blocked(self, ip):
+        now = time.monotonic()
+        with self.lock:
+            attempts = self.entries.setdefault(ip, deque())
+            self.entries.move_to_end(ip)
+            while attempts and attempts[0] < now - 900:
+                attempts.popleft()
+            if len(self.entries) > 10000:
+                self.entries.popitem(last=False)
+            if len(attempts) >= 5:
+                return True
+            attempts.append(now)
+            return False
+
+
+def create_app(auth=None, transport=rpc):
+    auth = auth or json.loads(Path('/etc/vless-panel/admin.json').read_text())
+    app = Flask(__name__, static_url_path=auth['panel_path'] + '/static')
+    prefix = auth['panel_path']
+    app.config.update(SECRET_KEY=auth['secret'], SESSION_COOKIE_NAME='vless_admin',
+        SESSION_COOKIE_PATH=prefix + '/', SESSION_COOKIE_SECURE=True, SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE='Strict', PERMANENT_SESSION_LIFETIME=timedelta(minutes=30),
+        SESSION_REFRESH_EACH_REQUEST=False, MAX_CONTENT_LENGTH=8192)
+    limiter = LoginLimiter()
+
+    @app.before_request
+    def security():
+        if request.host != auth['domain']:
+            abort(400)
+        if 'csrf' not in session:
+            session['csrf'] = secrets.token_urlsafe(32)
+        if request.method == 'POST':
+            if request.headers.get('Origin') not in (None, 'https://' + auth['domain']):
+                abort(403)
+            if not hmac.compare_digest(session['csrf'].encode(), request.form.get('csrf', '').encode()):
+                abort(403)
+
+    @app.after_request
+    def headers(response):
+        response.headers['Cache-Control'] = 'no-store'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['Referrer-Policy'] = 'no-referrer'
+        response.headers['X-Frame-Options'] = 'DENY'
+        response.headers['Content-Security-Policy'] = (
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; "
+            "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+        return response
+
+    def login_required(function):
+        @wraps(function)
+        def wrapped(*args, **kwargs):
+            if not session.get('authenticated'):
+                return redirect(url_for('login'))
+            return function(*args, **kwargs)
+        return wrapped
+
+    @app.route(prefix + '/login', methods=['GET', 'POST'])
+    def login():
+        error = None
+        if request.method == 'POST':
+            if limiter.blocked(request.headers.get('X-Real-IP', request.remote_addr)):
+                return render_template('login.html', error='Слишком много попыток. Повторите через 15 минут.'), 429
+            password = request.form.get('password', '')
+            if len(password) > 256:
+                abort(400)
+            valid_password = hmac.compare_digest(password_hash(password, auth['salt']), auth['password_hash'])
+            if valid_password and hmac.compare_digest(request.form.get('username', '').encode(), auth['username'].encode()):
+                session.clear()
+                session.update(authenticated=True, csrf=secrets.token_urlsafe(32))
+                session.permanent = True
+                return redirect(url_for('index'))
+            error = 'Неверный логин или пароль.'
+        return render_template('login.html', error=error)
+
+    @app.post(prefix + '/logout')
+    def logout():
+        session.clear()
+        return redirect(url_for('login'))
+
+    @app.get(prefix + '/')
+    @login_required
+    def index():
+        try:
+            clients = transport(dict(action='list'))
+        except (OSError, RuntimeError):
+            return render_template('error.html'), 503
+        return render_template('index.html', clients=clients, domain=auth['domain'])
+
+    @app.post(prefix + '/add')
+    @login_required
+    def add():
+        name = request.form.get('name', '').strip()
+        if not 1 <= len(name) <= 80 or any(ord(v) < 32 for v in name):
+            abort(400)
+        return mutate(dict(action='add', name=name))
+
+    def mutate(message):
+        try:
+            transport(message)
+            flash('Изменения применены. VPN-соединения могут переподключиться.')
+        except (OSError, RuntimeError):
+            flash('Изменения не применены. Проверьте журнал vless-admin на сервере.')
+        return redirect(url_for('index'))
+
+    @app.post(prefix + '/key/<uuid:key_id>/<action>')
+    @login_required
+    def update(key_id, action):
+        if action not in ('deactivate', 'delete'):
+            abort(404)
+        return mutate(dict(action=action, id=str(key_id)))
+
+    @app.get(prefix + '/key/<uuid:key_id>/qr.png')
+    @login_required
+    def qr(key_id):
+        import qrcode
+        try:
+            clients = transport(dict(action='list'))
+        except (OSError, RuntimeError):
+            abort(503)
+        client = next((v for v in clients if v['id'] == str(key_id) and v['active']), None)
+        if client is None:
+            abort(404)
+        output = io.BytesIO()
+        qrcode.make(client['link']).save(output, format='PNG')
+        output.seek(0)
+        return send_file(output, mimetype='image/png', as_attachment=True,
+                         download_name=f'happ-{key_id}.png', max_age=0)
+
+    return app

@@ -1,0 +1,47 @@
+name: Verify kit
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: '64'
+            sha256: b651f7e1d9966ee2c1b1ee1bf8b52c72771824d3065dce96bbc8bcc19ed95f82
+          - runner: ubuntu-24.04-arm
+            arch: arm64-v8a
+            sha256: 64ed6858982a7f5eb85d88b811089063bd4f17561f4c8f44e0f1dc8e6f6430be
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-flask gunicorn python3-qrcode python3-pil nginx openssl shellcheck unzip
+      - name: Fetch and verify pinned official Xray
+        env:
+          XRAY_ARCH: ${{ matrix.arch }}
+          XRAY_SHA: ${{ matrix.sha256 }}
+        run: |
+          mkdir -p /tmp/xray-kit
+          curl -fL --retry 3 "https://github.com/XTLS/Xray-core/releases/download/v26.11.9/Xray-linux-$XRAY_ARCH.zip" -o /tmp/xray-kit/core.zip
+          printf '%s  /tmp/xray-kit/core.zip\n' "$XRAY_SHA" | sha256sum -c -
+          unzip -q /tmp/xray-kit/core.zip -d /tmp/xray-kit
+          chmod +x /tmp/xray-kit/xray
+      - name: Manifest, shell checks, application tests
+        env:
+          XRAY_TEST_BIN: /tmp/xray-kit/xray
+          BASH_TEST_BIN: /bin/bash
+        run: |
+          sha256sum --strict -c SHA256SUMS
+          bash -n install.sh
+          bash -n bootstrap.sh
+          shellcheck -x install.sh bootstrap.sh inputs.sh
+          /usr/bin/python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Real TLS, bidirectional traffic, UDP and revocation
+        run: /usr/bin/python3 tests/integration.py --xray /tmp/xray-kit/xray --nginx /usr/sbin/nginx --openssl /usr/bin/openssl
+      - name: Real systemd services and panel HTTPS
+        run: sudo env GITHUB_ACTIONS=true VLESS_SYSTEMD_SMOKE=1 XRAY_TEST_BIN=/tmp/xray-kit/xray /usr/bin/python3 tests/systemd_smoke.py

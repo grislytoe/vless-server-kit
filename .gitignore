@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+connection/
+*.zip
+tools/
+vless-integration-*/
+panel-preview.*

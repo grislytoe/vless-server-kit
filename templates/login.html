@@ -1,0 +1,7 @@
+{% extends 'base.html' %}{% block content %}
+<section class="login"><p class="eyebrow">Личный сервер</p><h1>Управление VPN</h1><p class="muted">Войдите, чтобы управлять подключениями.</p>
+{% if error %}<p role="alert" class="notice">{{ error }}</p>{% endif %}
+<form method="post"><input type="hidden" name="csrf" value="{{ session.csrf }}">
+<label>Логин<input name="username" autocomplete="username" required maxlength="40"></label>
+<label>Пароль<input type="password" name="password" autocomplete="current-password" required maxlength="256"></label>
+<button>Войти</button></form></section>{% endblock %}
