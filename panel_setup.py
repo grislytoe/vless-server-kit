@@ -16,6 +16,23 @@ def password_hash(password, salt):
     return hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=16384, r=8, p=1, dklen=32).hex()
 
 
+def read_credentials():
+    # A TTY is not seekable. Text mode r+ creates a BufferedRandom stream,
+    # which requires seeking; separate read/write streams work with terminals.
+    with open('/dev/tty', 'r', encoding='utf-8') as tty_in, \
+            open('/dev/tty', 'w', encoding='utf-8') as tty_out:
+        tty_out.write('Panel login (3–40 letters/digits/_/-): ')
+        tty_out.flush()
+        username = tty_in.readline().strip()
+        if not re.fullmatch(r'[A-Za-z0-9_-]{3,40}', username):
+            raise SystemExit('Invalid login.')
+        password = getpass.getpass('Panel password (at least 16 characters): ', stream=tty_out)
+        confirmation = getpass.getpass('Repeat password: ', stream=tty_out)
+    if len(password) < 16 or len(password) > 256 or password != confirmation:
+        raise SystemExit('Passwords must match and contain 16–256 characters.')
+    return username, password
+
+
 def setup(reset=False):
     path = Path('/etc/vless-panel/admin.json')
     if path.exists() and not reset:
@@ -24,16 +41,7 @@ def setup(reset=False):
         if any(saved[key] != settings[key] for key in ('domain', 'panel_path')):
             raise SystemExit('Panel settings differ; explicit migration is required.')
         return
-    with open('/dev/tty', 'r+') as tty:
-        tty.write('Panel login (3–40 letters/digits/_/-): ')
-        tty.flush()
-        username = tty.readline().strip()
-        if not re.fullmatch(r'[A-Za-z0-9_-]{3,40}', username):
-            raise SystemExit('Invalid login.')
-        password = getpass.getpass('Panel password (at least 16 characters): ', stream=tty)
-        confirmation = getpass.getpass('Repeat password: ', stream=tty)
-    if len(password) < 16 or len(password) > 256 or password != confirmation:
-        raise SystemExit('Passwords must match and contain 16–256 characters.')
+    username, password = read_credentials()
     salt = secrets.token_hex(16)
     s = json.loads(Path('/var/lib/vless-optimized/settings.json').read_text())
     write(path, dict(username=username, salt=salt, password_hash=password_hash(password, salt),

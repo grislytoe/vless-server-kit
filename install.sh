@@ -127,7 +127,11 @@ cleanup() {
             fi
         done
         systemctl daemon-reload || true
-        if [[ "$NGINX_ACTIVE" == true ]]; then systemctl restart nginx || true; else systemctl stop nginx || true; fi
+        if [[ "$NGINX_ACTIVE" == true ]]; then
+            systemctl restart nginx || true
+        elif systemctl cat nginx.service >/dev/null 2>&1; then
+            systemctl stop nginx || true
+        fi
         if [[ "$XRAY_ACTIVE" == true ]]; then systemctl restart xray || true; fi
         if [[ "$ADMIN_ACTIVE" == true ]]; then systemctl restart vless-admin || true; fi
         if [[ "$PANEL_ACTIVE" == true ]]; then systemctl restart vless-panel || true; fi
