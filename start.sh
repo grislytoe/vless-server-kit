@@ -22,8 +22,8 @@ main() {
         apt-get install -y ca-certificates curl python3 iproute2 util-linux tar coreutils
     fi
     # Release pointer: updated only after the real Linux service checks pass.
-    REVISION=37acb97ab1cfa2c912c3aa1761b3a50ec13e308d
-    ARCHIVE_SHA256=a3d729d2df189f46df582cd48bb31d5acb43dd1648230562b6189675d878089f
+    REVISION=fefadd2493bedf9f3d49eefc804a5940236769c5
+    ARCHIVE_SHA256=3cec005b7ad0fa690ff94db685f082ca1daf52918c95824834f7658c809878bb
     WORK=$(mktemp -d /tmp/vless-release.XXXXXXXX)
     trap '[[ "$WORK" == /tmp/vless-release.* ]] && rm -rf -- "$WORK"' EXIT
     curl --proto '=https' --tlsv1.2 -fSL --retry 3 --connect-timeout 15 --max-time 180 \
