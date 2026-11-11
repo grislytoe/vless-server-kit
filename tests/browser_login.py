@@ -10,6 +10,7 @@ import uuid
 import io
 from PIL import Image
 import zxingcpp
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from panel import create_app
@@ -107,7 +108,7 @@ def main():
                             expect(page.locator('#client-count')).to_have_text('1 активных · 1 всего')
                             preview = page.locator('img.qr-preview')
                             expect(preview).to_be_visible()
-                            decoded = zxingcpp.read_barcode(Image.open(io.BytesIO(preview.screenshot())))
+                            decoded = zxingcpp.read_barcode(np.asarray(Image.open(io.BytesIO(preview.screenshot())).convert('RGB')))
                             assert decoded is not None and decoded.text == clients[0]['link']
                             download = page.get_by_role('link', name='Скачать QR')
                             assert download.is_visible()
