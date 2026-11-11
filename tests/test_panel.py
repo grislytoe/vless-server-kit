@@ -98,6 +98,24 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertNotIn('private internal failure', response.get_data(as_text=True))
 
+    def test_stale_login_form_recovers_with_cookie_and_csrf_checks(self):
+        self.get('/login')
+        old_token = self.csrf()
+        # Reopening an old tab after clearing cookies / replacing a session.
+        self.client = self.app.test_client()
+        response = self.post('/login', dict(csrf=old_token, username='admin', password=self.password))
+        self.assertEqual(response.status_code, 403)
+        self.assertIn('cookie', response.get_data(as_text=True))
+        new_token = re.search(r'name="csrf" value="([^"]+)"', response.get_data(as_text=True))[1]
+        self.assertNotEqual(old_token, new_token)
+        self.assertEqual(self.post('/login', dict(csrf=new_token, username='admin', password=self.password)).status_code, 302)
+
+    def test_static_assets_do_not_create_sessions(self):
+        response = self.get('/static/panel.css')
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('Set-Cookie', response.headers)
+        response.close()
+
 
 if __name__ == '__main__':
     unittest.main()

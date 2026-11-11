@@ -64,13 +64,21 @@ def create_app(auth=None, transport=rpc):
     def security():
         if request.host != auth['domain']:
             abort(400)
+        # Asset requests must not mint a competing session/CSRF cookie.
+        if request.endpoint == 'static':
+            return
         if 'csrf' not in session:
             session['csrf'] = secrets.token_urlsafe(32)
         if request.method == 'POST':
             if request.headers.get('Origin') not in (None, 'https://' + auth['domain']):
                 abort(403)
             if not hmac.compare_digest(session['csrf'].encode(), request.form.get('csrf', '').encode()):
-                abort(403)
+                app.logger.warning('Form rejected: missing or expired CSRF session')
+                if request.endpoint == 'login':
+                    return render_template('login.html', error=(
+                        'Сессия формы устарела или браузер не передал cookie. '
+                        'Повторите вход в этой форме. Разрешите cookie для домена панели.')), 403
+                return render_template('form_expired.html'), 403
 
     @app.after_request
     def headers(response):

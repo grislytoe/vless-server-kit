@@ -328,4 +328,4 @@ certbot renew --dry-run --no-random-sleep-on-renew
 SUCCESS=true
 printf 'Installed. Backup: %s\nHapp link: sudo cat %s/client.txt\nQR: %s/client-qr.png\n' "$BACKUP" "$STATE" "$STATE"
 printf 'Next: import the link into Happ; verify traffic, idle reconnect and latency under load.\n'
-printf 'Panel: https://%s%s/ (use the login/password entered during installation)\n' "$DOMAIN" "$PANEL_PATH"
+printf 'Panel: \033[1;32mhttps://%s%s/\033[0m (use the login/password entered during installation)\n' "$DOMAIN" "$PANEL_PATH"
