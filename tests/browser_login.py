@@ -8,6 +8,7 @@ import tempfile
 import threading
 import uuid
 import io
+import hmac
 from PIL import Image
 import zxingcpp
 import numpy as np
@@ -46,6 +47,10 @@ def main():
             next(v for v in clients if v['id'] == message['id'])['active'] = False
         elif message['action'] == 'delete':
             clients[:] = [v for v in clients if v['id'] != message['id']]
+        elif message['action'] == 'change_password':
+            if not hmac.compare_digest(password_hash(message['current_password'], auth['salt']), auth['password_hash']):
+                return {'ok': False}
+            auth.update(password_hash=password_hash(message['new_password'], auth['salt']), version=secrets.token_hex(32))
         return {'ok': True}
     app = create_app(auth, transport)
     policies, origins, results = {'legacy': False}, [], []
@@ -130,6 +135,25 @@ def main():
                             page.get_by_role('button', name='Создать ключ', exact=True).click()
                             expect(page.get_by_role('heading', name='Second device', exact=True)).to_be_visible()
                             expect(page.get_by_role('button', name='Выйти', exact=True)).to_be_enabled()
+                            page.get_by_role('link', name='Сменить пароль', exact=True).click()
+                            page.get_by_label('Текущий пароль', exact=True).fill('wrong-password')
+                            new_password = secrets.token_urlsafe(32)
+                            page.get_by_label('Новый пароль', exact=True).fill(new_password)
+                            page.get_by_label('Повтор нового пароля', exact=True).fill(new_password)
+                            with page.expect_navigation():
+                                page.get_by_role('button', name='Сохранить пароль', exact=True).click()
+                            assert page.get_by_role('alert').inner_text() == 'Неверный текущий пароль.'
+                            page.get_by_label('Текущий пароль', exact=True).fill(password)
+                            page.get_by_label('Новый пароль', exact=True).fill(new_password)
+                            page.get_by_label('Повтор нового пароля', exact=True).fill(new_password)
+                            with page.expect_navigation():
+                                page.get_by_role('button', name='Сохранить пароль', exact=True).click()
+                            expect(page.get_by_role('heading', name='Управление VPN')).to_be_visible()
+                            page.get_by_label('Логин').fill('browser-test')
+                            page.get_by_label('Пароль', exact=True).fill(new_password)
+                            with page.expect_navigation():
+                                page.get_by_role('button', name='Войти', exact=True).click()
+                            expect(page.get_by_role('heading', name='Ключи подключения')).to_be_visible()
                             with page.expect_navigation():
                                 page.get_by_role('button', name='Выйти', exact=True).click()
                             assert page.get_by_role('heading', name='Управление VPN').is_visible()

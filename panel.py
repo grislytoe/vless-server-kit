@@ -13,7 +13,7 @@ import threading
 import time
 import uuid
 
-from flask import Flask, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
+from flask import Flask, abort, flash, g, jsonify, redirect, render_template, request, send_file, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 from panel_setup import password_hash
 
@@ -52,6 +52,7 @@ class LoginLimiter:
 
 
 def create_app(auth=None, transport=rpc):
+    supplied_auth = auth
     auth = auth or json.loads(Path('/etc/vless-panel/admin.json').read_text())
     app = Flask(__name__, static_url_path=auth['panel_path'] + '/static')
     # Gunicorn accepts only the local Nginx Unix socket. Trust its fixed HTTPS
@@ -63,6 +64,7 @@ def create_app(auth=None, transport=rpc):
         SESSION_COOKIE_SAMESITE='Strict', PERMANENT_SESSION_LIFETIME=timedelta(minutes=30),
         SESSION_REFRESH_EACH_REQUEST=False, MAX_CONTENT_LENGTH=8192)
     limiter = LoginLimiter()
+    password_limiter = LoginLimiter()
     operations, operation_lock = OrderedDict(), threading.Lock()
 
     def operation_result(identifier):
@@ -80,6 +82,12 @@ def create_app(auth=None, transport=rpc):
         # Asset requests must not mint a competing session/CSRF cookie.
         if request.endpoint == 'static':
             return
+        try:
+            g.admin_auth = supplied_auth if supplied_auth is not None else json.loads(Path('/etc/vless-panel/admin.json').read_text())
+        except (OSError, ValueError):
+            abort(503)
+        if session.get('authenticated') and session.get('auth_version', '') != g.admin_auth.get('version', ''):
+            session.clear()
         if 'csrf' not in session:
             session['csrf'] = secrets.token_urlsafe(32)
         if request.method == 'POST':
@@ -125,14 +133,42 @@ def create_app(auth=None, transport=rpc):
             password = request.form.get('password', '')
             if len(password) > 256:
                 abort(400)
-            valid_password = hmac.compare_digest(password_hash(password, auth['salt']), auth['password_hash'])
-            if valid_password and hmac.compare_digest(request.form.get('username', '').encode(), auth['username'].encode()):
+            current_auth = g.admin_auth
+            valid_password = hmac.compare_digest(password_hash(password, current_auth['salt']), current_auth['password_hash'])
+            if valid_password and hmac.compare_digest(request.form.get('username', '').encode(), current_auth['username'].encode()):
                 session.clear()
-                session.update(authenticated=True, csrf=secrets.token_urlsafe(32))
+                session.update(authenticated=True, csrf=secrets.token_urlsafe(32), auth_version=current_auth.get('version', ''))
                 session.permanent = True
                 return redirect(url_for('index'), code=303)
             error = 'Неверный логин или пароль.'
         return render_template('login.html', error=error)
+
+    @app.route(prefix + '/password', methods=['GET', 'POST'])
+    @login_required
+    def change_password():
+        error = None
+        if request.method == 'POST':
+            if password_limiter.blocked(request.headers.get('X-Real-IP', request.remote_addr)):
+                return render_template('password.html', error='Слишком много попыток. Повторите через 15 минут.'), 429
+            current = request.form.get('current_password', '')
+            new = request.form.get('new_password', '')
+            if not 16 <= len(new) <= 256:
+                error = 'Новый пароль должен содержать 16–256 символов.'
+            elif new != request.form.get('confirmation', ''):
+                error = 'Новые пароли не совпадают.'
+            elif len(current) > 256:
+                error = 'Неверный текущий пароль.'
+            else:
+                try:
+                    result = transport(dict(action='change_password', current_password=current, new_password=new))
+                    if result.get('ok'):
+                        session.clear()
+                        flash('Пароль изменён. Войдите с новым паролем.')
+                        return redirect(url_for('login'), code=303)
+                    error = 'Неверный текущий пароль.'
+                except (OSError, RuntimeError):
+                    error = 'Не удалось сменить пароль. Повторите позже.'
+        return render_template('password.html', error=error), 400 if error else 200
 
     @app.post(prefix + '/logout')
     def logout():

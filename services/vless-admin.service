@@ -15,7 +15,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/vless-optimized /usr/local/etc/xray /run/lock
+ReadWritePaths=/var/lib/vless-optimized /usr/local/etc/xray /run/lock /etc/vless-panel
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
 [Install]

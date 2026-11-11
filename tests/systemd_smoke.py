@@ -143,6 +143,18 @@ server {{
             assert not rpc(dict(action='list'))[0]['active']
             assert request('POST', '/key/' + keys[1]['id'] + '/delete', dict(csrf=csrf))[0] == 303
             assert json.loads((directory / 'config.json').read_text())['inbounds'][0]['settings']['clients'] == []
+            new_password = secrets.token_urlsafe(32)
+            assert request('POST', '/password', dict(csrf=csrf, current_password='wrong',
+                           new_password=new_password, confirmation=new_password))[0] == 400
+            assert request('POST', '/password', dict(csrf=csrf, current_password=password,
+                           new_password=new_password, confirmation=new_password))[0] == 303
+            status, html = request('GET', '/login')
+            csrf = re.search(rb'name="csrf" value="([^"]+)"', html)[1].decode()
+            assert request('POST', '/login', dict(csrf=csrf, username='test-admin', password=password))[0] == 200
+            assert request('POST', '/login', dict(csrf=csrf, username='test-admin', password=new_password))[0] == 303
+            saved_auth = json.loads((authdir / 'admin.json').read_text())
+            assert saved_auth['password_hash'] == password_hash(new_password, saved_auth['salt'])
+            assert (authdir / 'admin.json').stat().st_mode & 0o777 == 0o640
             run('systemctl', 'is-active', '--quiet', 'xray', 'vless-admin', 'vless-panel', 'nginx')
             print('PASS: real systemd units, nonroot panel, Unix socket permissions, Nginx HTTPS, login, add, QR, deactivate, delete.')
     except Exception:

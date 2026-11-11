@@ -150,6 +150,28 @@ class PanelTests(unittest.TestCase):
         finally:
             self.app.response_class.autocorrect_location_header = original
 
+    def test_change_password_form_and_session_revocation(self):
+        self.assertEqual(self.get('/password').status_code, 302)
+        self.login()
+        self.assertIn('Сменить пароль', self.get('/').get_data(as_text=True))
+        new = 'new-test-password-456'
+        self.assertEqual(self.post('/password', dict(csrf=self.csrf(), current_password=self.password,
+                         new_password=new, confirmation='different')).status_code, 400)
+        self.assertEqual(self.messages[-1]['action'], 'list')
+        old_cookie_client = self.client
+        self.client = self.app.test_client()
+        self.login()
+        result = self.post('/password', dict(csrf=self.csrf(), current_password=self.password,
+                                           new_password=new, confirmation=new))
+        self.assertEqual(result.status_code, 303)
+        self.assertEqual(self.messages[-1]['action'], 'change_password')
+        # The root manager persists a fresh version; the next request reads it.
+        self.auth.update(version='rotated-version', password_hash=password_hash(new, self.auth['salt']))
+        self.assertEqual(old_cookie_client.get(self.prefix + '/', base_url='https://vpn.example.com').status_code, 302)
+        self.assertEqual(self.get('/').status_code, 302)
+        self.password = new
+        self.assertEqual(self.login().status_code, 303)
+
 
 if __name__ == '__main__':
     unittest.main()

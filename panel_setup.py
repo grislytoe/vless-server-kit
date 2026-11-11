@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import tempfile
 
 from config import write
 import json
@@ -14,6 +15,22 @@ import json
 
 def password_hash(password, salt):
     return hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=16384, r=8, p=1, dklen=32).hex()
+
+
+def write_auth(path, value):
+    path = Path(path)
+    fd, temporary = tempfile.mkstemp(prefix='admin-', dir=path.parent)
+    os.close(fd)
+    staged = Path(temporary)
+    try:
+        write(staged, value)
+        if os.name == 'posix' and os.geteuid() == 0:
+            import grp
+            os.chown(staged, 0, grp.getgrnam('vless-admin').gr_gid)
+            os.chmod(staged, 0o640)
+        os.replace(staged, path)
+    finally:
+        staged.unlink(missing_ok=True)
 
 
 def read_credentials():

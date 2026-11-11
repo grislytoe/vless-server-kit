@@ -4,6 +4,8 @@ import argparse
 import copy
 import json
 import os
+import hmac
+import secrets
 from pathlib import Path
 import socket
 import struct
@@ -18,6 +20,7 @@ if os.name == 'posix':
     import pwd
 
 from config import client_url, server_config, validate, validate_credentials, write
+from panel_setup import password_hash, write_auth
 
 STATE = Path('/var/lib/vless-optimized')
 CONFIG = Path('/usr/local/etc/xray/config.json')
@@ -43,8 +46,9 @@ def validate_clients(clients):
 
 
 class Manager:
-    def __init__(self, state=STATE, config=CONFIG, runner=subprocess.run):
+    def __init__(self, state=STATE, config=CONFIG, runner=subprocess.run, auth_path='/etc/vless-panel/admin.json'):
         self.state, self.config, self.runner = Path(state), Path(config), runner
+        self.auth_path = Path(auth_path)
 
     def initialize(self):
         target = self.state / 'clients.json'
@@ -102,6 +106,17 @@ class Manager:
             return self._dispatch(request)
 
     def _dispatch(self, request):
+        if request.get('action') == 'change_password':
+            current, password = request.get('current_password'), request.get('new_password')
+            if not isinstance(current, str) or not isinstance(password, str) or not 16 <= len(password) <= 256 or len(current) > 256:
+                return dict(ok=False, error='invalid_password')
+            auth = load(self.auth_path)
+            if not hmac.compare_digest(password_hash(current, auth['salt']), auth['password_hash']):
+                return dict(ok=False, error='wrong_password')
+            salt = secrets.token_hex(16)
+            auth.update(salt=salt, password_hash=password_hash(password, salt), version=secrets.token_hex(32))
+            write_auth(self.auth_path, auth)
+            return dict(ok=True)
         self.recover()
         clients = self.initialize()
         action = request.get('action')

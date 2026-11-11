@@ -10,6 +10,7 @@ import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from admin import Manager, validate_clients
 from config import DEFAULTS, server_config, write
+from panel_setup import password_hash
 
 
 class AdminTests(unittest.TestCase):
@@ -97,6 +98,29 @@ class AdminTests(unittest.TestCase):
         clients = self.manager.initialize()
         with self.assertRaises(ValueError):
             validate_clients(clients + copy.deepcopy(clients))
+
+    def test_password_change_checks_old_password_and_preserves_vpn(self):
+        path = self.root / 'admin.json'
+        password, salt = 'original-test-password-123', '01' * 16
+        auth = dict(username='admin', salt=salt, password_hash=password_hash(password, salt),
+                    secret='test-session-secret', domain='vpn.example.test', panel_path='/manage-test')
+        write(path, auth)
+        self.manager.auth_path = path
+        clients_before = (self.root / 'clients.json').read_bytes()
+        for current, new in (('wrong', 'new-test-password-456'), (password, 'short')):
+            result = self.manager._dispatch(dict(action='change_password', current_password=current, new_password=new))
+            self.assertFalse(result['ok'])
+            self.assertEqual(json.loads(path.read_text()), auth)
+        new_password = 'new-test-password-456'
+        self.assertTrue(self.manager._dispatch(dict(action='change_password', current_password=password, new_password=new_password))['ok'])
+        saved = json.loads(path.read_text())
+        self.assertEqual(saved['password_hash'], password_hash(new_password, saved['salt']))
+        self.assertEqual(saved['secret'], auth['secret'])
+        self.assertEqual(saved['username'], auth['username'])
+        self.assertTrue(saved['version'])
+        self.assertNotIn(new_password, path.read_text())
+        self.assertEqual(clients_before, (self.root / 'clients.json').read_bytes())
+        self.assertEqual(self.calls, [])
 
 
 if __name__ == '__main__':

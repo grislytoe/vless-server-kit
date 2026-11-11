@@ -1,6 +1,6 @@
 {% extends 'base.html' %}{% block content %}
 <header><div><p class="eyebrow">{{ domain }}</p><h1>Ключи подключения</h1></div>
-<form action="{{ url_for('logout') }}" method="post"><input type="hidden" name="csrf" value="{{ session.csrf }}"><button class="secondary">Выйти</button></form></header>
+<div class="actions"><a class="button secondary" href="{{ url_for('change_password') }}">Сменить пароль</a><form action="{{ url_for('logout') }}" method="post"><input type="hidden" name="csrf" value="{{ session.csrf }}"><button class="secondary">Выйти</button></form></div></header>
 <p class="muted" id="client-count">{{ clients | selectattr('active') | list | length }} активных · {{ clients | length }} всего</p>
 <p id="operation-status" role="status" data-panel="{{ url_for('index') }}">{% if operation %}{{ operation.message }}{% endif %}</p>
 {% for message in get_flashed_messages() %}<p role="status" class="notice">{{ message }}</p>{% endfor %}
