@@ -52,8 +52,23 @@ jobs:
           bash -n install.sh
           bash -n bootstrap.sh
           shellcheck -x install.sh bootstrap.sh inputs.sh
+          if [[ -f start.sh ]]; then
+            bash -n start.sh
+            shellcheck -x start.sh
+          fi
           /usr/bin/python3 -m unittest discover -s tests -p 'test_*.py' -v
       - name: Real TLS, bidirectional traffic, UDP and revocation
         run: /usr/bin/python3 tests/integration.py --xray /tmp/xray-kit/xray --nginx /usr/sbin/nginx --openssl /usr/bin/openssl
       - name: Real systemd services and panel HTTPS
         run: sudo env GITHUB_ACTIONS=true VLESS_SYSTEMD_SMOKE=1 XRAY_TEST_BIN=/tmp/xray-kit/xray /usr/bin/python3 tests/systemd_smoke.py
+      - name: Verify launcher release download
+        run: |
+          if [[ -f start.sh ]]; then
+            release=$(sed -n 's/^    REVISION=//p' start.sh)
+            digest=$(sed -n 's/^    ARCHIVE_SHA256=//p' start.sh)
+            curl -fL --retry 3 "https://codeload.github.com/grislytoe/vless-server-kit/tar.gz/$release" -o /tmp/vless-launcher.tar.gz
+            printf '%s  /tmp/vless-launcher.tar.gz\n' "$digest" | sha256sum -c -
+            mkdir /tmp/vless-launcher
+            tar -xzf /tmp/vless-launcher.tar.gz --strip-components=1 -C /tmp/vless-launcher
+            (cd /tmp/vless-launcher && sha256sum --strict -c SHA256SUMS)
+          fi
