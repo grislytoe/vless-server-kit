@@ -71,7 +71,8 @@ def create_app(auth=None, transport=rpc):
             session['csrf'] = secrets.token_urlsafe(32)
         if request.method == 'POST':
             if request.headers.get('Origin') not in (None, 'https://' + auth['domain']):
-                abort(403)
+                app.logger.warning('Form rejected: unexpected Origin header')
+                return render_template('request_origin.html'), 403
             if not hmac.compare_digest(session['csrf'].encode(), request.form.get('csrf', '').encode()):
                 app.logger.warning('Form rejected: missing or expired CSRF session')
                 if request.endpoint == 'login':
