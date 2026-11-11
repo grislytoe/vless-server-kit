@@ -104,7 +104,8 @@ def main():
         nginx = nginx.replace(f"/etc/letsencrypt/live/{s['domain']}/privkey.pem", key.as_posix())
         nginx = nginx.replace("/var/www/vless-cover", root.as_posix())
         (root / "index.html").write_text("local fallback")
-        nginx = "daemon off;\nmaster_process off;\nevents {}\nhttp {\n" + nginx + "\n}\n"
+        nginx = ("daemon off;\nmaster_process off;\npid logs/nginx.pid;\nerror_log logs/error.log;\n"
+                 "events {}\nhttp {\naccess_log logs/access.log;\n" + nginx + "\n}\n")
         write(root / "nginx.conf", nginx)
         prefix = root.as_posix() + "/"
         result = subprocess.run([args.nginx, "-t", "-p", prefix, "-c", "nginx.conf"], capture_output=True, text=True)

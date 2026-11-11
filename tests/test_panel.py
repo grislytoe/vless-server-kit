@@ -50,8 +50,8 @@ class PanelTests(unittest.TestCase):
         response = self.get('/')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers['Cache-Control'], 'no-store')
-        self.assertIn('&lt;script&gt;', response.text)
-        self.assertNotIn('<script>alert(1)</script>', response.text)
+        self.assertIn('&lt;script&gt;', response.get_data(as_text=True))
+        self.assertNotIn('<script>alert(1)</script>', response.get_data(as_text=True))
         self.assertEqual(self.post('/add', dict(csrf=self.csrf(), name='Wrong origin'),
             headers={'Origin': 'https://evil.example'}).status_code, 403)
 
@@ -96,7 +96,7 @@ class PanelTests(unittest.TestCase):
             session.update(authenticated=True, csrf='test')
         response = client.get(self.prefix + '/', base_url='https://vpn.example.com')
         self.assertEqual(response.status_code, 503)
-        self.assertNotIn('private internal failure', response.text)
+        self.assertNotIn('private internal failure', response.get_data(as_text=True))
 
 
 if __name__ == '__main__':

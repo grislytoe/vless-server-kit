@@ -73,8 +73,8 @@ def main():
     for path in (base / 'services').glob('*.service'):
         shutil.copyfile(path, Path('/etc/systemd/system') / path.name)
     run('systemctl', 'daemon-reload')
-    run('systemctl', 'start', 'xray', 'vless-admin', 'vless-panel')
     try:
+        run('systemctl', 'start', 'xray', 'vless-admin', 'vless-panel')
         for _ in range(30):
             if Path('/run/vless-panel/http.sock').exists() and Path('/run/vless-admin/control.sock').exists():
                 break
