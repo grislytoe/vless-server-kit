@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Unprivileged admin UI, published only through the local Nginx TLS fallback."""
-from collections import OrderedDict, deque
+from collections import OrderedDict
 from datetime import timedelta
 from functools import wraps
 import hmac
@@ -16,6 +16,7 @@ import uuid
 from flask import Flask, abort, flash, g, jsonify, redirect, render_template, request, send_file, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 from panel_setup import password_hash
+from security_state import SecurityState
 
 
 def rpc(message):
@@ -32,25 +33,6 @@ def rpc(message):
     return result['result']
 
 
-class LoginLimiter:
-    def __init__(self):
-        self.entries, self.lock = OrderedDict(), threading.Lock()
-
-    def blocked(self, ip):
-        now = time.monotonic()
-        with self.lock:
-            attempts = self.entries.setdefault(ip, deque())
-            self.entries.move_to_end(ip)
-            while attempts and attempts[0] < now - 900:
-                attempts.popleft()
-            if len(self.entries) > 10000:
-                self.entries.popitem(last=False)
-            if len(attempts) >= 5:
-                return True
-            attempts.append(now)
-            return False
-
-
 def create_app(auth=None, transport=rpc):
     supplied_auth = auth
     auth = auth or json.loads(Path('/etc/vless-panel/admin.json').read_text())
@@ -63,8 +45,8 @@ def create_app(auth=None, transport=rpc):
         SESSION_COOKIE_PATH=prefix + '/', SESSION_COOKIE_SECURE=True, SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE='Strict', PERMANENT_SESSION_LIFETIME=timedelta(minutes=30),
         SESSION_REFRESH_EACH_REQUEST=False, MAX_CONTENT_LENGTH=8192)
-    limiter = LoginLimiter()
-    password_limiter = LoginLimiter()
+    state = SecurityState(':memory:' if supplied_auth is not None else '/var/lib/vless-panel/security.sqlite3')
+    app.extensions['security_state'] = state
     operations, operation_lock = OrderedDict(), threading.Lock()
 
     def operation_result(identifier):
@@ -77,6 +59,8 @@ def create_app(auth=None, transport=rpc):
 
     @app.before_request
     def security():
+        if not request.is_secure:
+            abort(400)
         if request.host != auth['domain']:
             abort(400)
         # Asset requests must not mint a competing session/CSRF cookie.
@@ -86,7 +70,9 @@ def create_app(auth=None, transport=rpc):
             g.admin_auth = supplied_auth if supplied_auth is not None else json.loads(Path('/etc/vless-panel/admin.json').read_text())
         except (OSError, ValueError):
             abort(503)
-        if session.get('authenticated') and session.get('auth_version', '') != g.admin_auth.get('version', ''):
+        if session.get('authenticated') and (session.get('auth_version', '') != g.admin_auth.get('version', '') or
+                                             not state.valid(session.get('sid'))):
+            state.revoke(session.get('sid'))
             session.clear()
         if 'csrf' not in session:
             session['csrf'] = secrets.token_urlsafe(32)
@@ -128,7 +114,7 @@ def create_app(auth=None, transport=rpc):
     def login():
         error = None
         if request.method == 'POST':
-            if limiter.blocked(request.headers.get('X-Real-IP', request.remote_addr)):
+            if state.blocked('login', request.headers.get('X-Real-IP', request.remote_addr)):
                 return render_template('login.html', error='Слишком много попыток. Повторите через 15 минут.'), 429
             password = request.form.get('password', '')
             if len(password) > 256:
@@ -136,8 +122,9 @@ def create_app(auth=None, transport=rpc):
             current_auth = g.admin_auth
             valid_password = hmac.compare_digest(password_hash(password, current_auth['salt']), current_auth['password_hash'])
             if valid_password and hmac.compare_digest(request.form.get('username', '').encode(), current_auth['username'].encode()):
+                state.revoke(session.get('sid'))
                 session.clear()
-                session.update(authenticated=True, csrf=secrets.token_urlsafe(32), auth_version=current_auth.get('version', ''))
+                session.update(authenticated=True, csrf=secrets.token_urlsafe(32), auth_version=current_auth.get('version', ''), sid=state.new_session())
                 session.permanent = True
                 return redirect(url_for('index'), code=303)
             error = 'Неверный логин или пароль.'
@@ -148,7 +135,7 @@ def create_app(auth=None, transport=rpc):
     def change_password():
         error = None
         if request.method == 'POST':
-            if password_limiter.blocked(request.headers.get('X-Real-IP', request.remote_addr)):
+            if state.blocked('password', request.headers.get('X-Real-IP', request.remote_addr)):
                 return render_template('password.html', error='Слишком много попыток. Повторите через 15 минут.'), 429
             current = request.form.get('current_password', '')
             new = request.form.get('new_password', '')
@@ -162,6 +149,7 @@ def create_app(auth=None, transport=rpc):
                 try:
                     result = transport(dict(action='change_password', current_password=current, new_password=new))
                     if result.get('ok'):
+                        state.revoke(session.get('sid'))
                         session.clear()
                         flash('Пароль изменён. Войдите с новым паролем.')
                         return redirect(url_for('login'), code=303)
@@ -172,6 +160,7 @@ def create_app(auth=None, transport=rpc):
 
     @app.post(prefix + '/logout')
     def logout():
+        state.revoke(session.get('sid'))
         session.clear()
         return redirect(url_for('login'), code=303)
 

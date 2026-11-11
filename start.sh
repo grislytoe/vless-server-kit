@@ -3,6 +3,8 @@
 # shellcheck source-path=SCRIPTDIR
 main() {
     set -Eeuo pipefail
+    export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+    unset PYTHONPATH PYTHONHOME
     umask 077
     die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
     [[ $EUID -eq 0 ]] || die 'Run through sudo bash or from a root SSH session.'

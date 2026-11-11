@@ -2,6 +2,8 @@
 # Dedicated Ubuntu/Debian VPS only. Run --check first. No remote shell scripts.
 # shellcheck source-path=SCRIPTDIR
 set -Eeuo pipefail
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+unset PYTHONPATH PYTHONHOME
 umask 077
 BASE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 STATE=/var/lib/vless-optimized
@@ -81,10 +83,11 @@ sysctl net.ipv4.tcp_congestion_control net.ipv4.tcp_available_congestion_control
 [[ "$ACTION" == install ]] || exit 0
 [[ $EUID -eq 0 ]] || die 'Run --install with sudo.'
 command -v flock >/dev/null || die 'Install util-linux (flock) first.'
-exec 9>/run/lock/vless-optimized.lock
+install -d -m 700 -o root -g root /run/vless-optimized-lock
+exec 9>/run/vless-optimized-lock/install.lock
 flock -n 9 || die 'Another installation is running.'
 if [[ -f "$STATE/pending.json" ]]; then python3 "$BASE/admin.py" recover; fi
-install -d -m 700 "$STATE" "$STATE/backups"
+install -d -m 700 -o root -g root "$STATE" "$STATE/backups"
 # The ownership/settings marker survives an interrupted first install to permit retries.
 if [[ ! -f "$STATE/settings.json" ]]; then
     python3 "$BASE/config.py" settings --settings "$STATE/settings.json" \
@@ -144,6 +147,9 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+# Also stop old releases using the legacy lock before taking snapshots.
+systemctl stop vless-panel vless-admin >/dev/null 2>&1 || true
+if [[ -f "$STATE/pending.json" ]]; then python3 "$BASE/admin.py" recover; fi
 for target in "$CONFIG" "$BIN" "$UNIT" "$SITE" \
     /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf /var/www/vless-cover/index.html \
     /etc/apt/sources.list.d/vless-nginx.list /etc/apt/preferences.d/vless-nginx \
@@ -152,9 +158,8 @@ for target in "$CONFIG" "$BIN" "$UNIT" "$SITE" \
     "$STATE/client.txt" "$STATE/client.json" "$STATE/client-qr.png" \
     "$STATE/settings.json" "$STATE/clients.json" /etc/vless-panel/admin.json \
     /etc/systemd/system/vless-admin.service /etc/systemd/system/vless-panel.service; do snapshot "$target"; done
-# Pause local mutations for the entire upgrade; sessions and credentials are retained.
-systemctl stop vless-panel vless-admin >/dev/null 2>&1 || true
-for file in config.py admin.py panel.py panel_setup.py; do snapshot "/opt/vless-optimized/$file"; done
+# Local mutations remain stopped throughout the upgrade.
+for file in config.py admin.py panel.py panel_setup.py security_state.py; do snapshot "/opt/vless-optimized/$file"; done
 for file in "$BASE"/templates/*.html "$BASE"/static/*; do snapshot "/opt/vless-optimized/${file#"$BASE/"}"; done
 python3 - "$STATE/settings.json" <<'PY'
 import json, secrets, sys
@@ -174,7 +179,8 @@ install -d -m 750 -o root -g vless-admin /etc/vless-panel
 python3 "$BASE/panel_setup.py"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y ca-certificates curl unzip python3 certbot openssl qrencode python3-flask gunicorn python3-qrcode python3-pil
+apt-get install -y ca-certificates curl unzip python3 python3-venv certbot openssl qrencode python3-flask python3-werkzeug python3-jinja2 python3-itsdangerous python3-markupsafe python3-qrcode python3-pil
+bash "$BASE/runtime.sh"
 if [[ "$ID:$VERSION_ID" == ubuntu:22.04 ]]; then
     # Jammy's stock 1.18 lacks ssl_reject_handshake. Use the official signed
     # stable repository, scoped to this repository's signing key.
@@ -243,10 +249,7 @@ HOOK
 chmod 755 /etc/letsencrypt/renewal-hooks/deploy/vless-nginx
 systemctl enable --now certbot.timer
 # TLS 1.3 + H2 are required for this REALITY target. Check before changing Xray.
-timeout 10 openssl s_client -connect "127.0.0.1:$FALLBACK" -servername "$DOMAIN" \
-    -tls1_3 -alpn h2 -verify_return_error -verify_hostname "$DOMAIN" \
-    </dev/null > "$WORK/tls-check.txt" 2>&1
-grep -q 'ALPN protocol: h2' "$WORK/tls-check.txt" || die 'Fallback did not negotiate H2.'
+python3 "$BASE/tls_check.py" --domain "$DOMAIN" --port "$FALLBACK"
 if ! id xray >/dev/null 2>&1; then
     useradd --system --user-group --no-create-home --shell /usr/sbin/nologin xray
 fi
@@ -305,7 +308,7 @@ then
     chmod 600 "$STATE/client-qr.png"
 fi
 install -d -m 755 /opt/vless-optimized /opt/vless-optimized/templates /opt/vless-optimized/static
-for file in config.py admin.py panel.py panel_setup.py; do install -m 644 "$BASE/$file" "/opt/vless-optimized/$file"; done
+for file in config.py admin.py panel.py panel_setup.py security_state.py; do install -m 644 "$BASE/$file" "/opt/vless-optimized/$file"; done
 install -m 644 "$BASE"/templates/*.html /opt/vless-optimized/templates/
 install -m 644 "$BASE"/static/* /opt/vless-optimized/static/
 install -m 644 "$BASE"/services/*.service /etc/systemd/system/

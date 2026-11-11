@@ -77,7 +77,7 @@ def server_config(settings, credentials, clients=None):
             "settings": {"clients": [{"id": value} for value in ids], "decryption": "none"},
             "streamSettings": {"network": "xhttp", "security": "reality",
                 "realitySettings": {"show": False, "target": f"127.0.0.1:{s['fallback_port']}",
-                    "xver": 0, "serverNames": [s["domain"]],
+                    "xver": 1, "serverNames": [s["domain"]],
                     "privateKey": c["private_key"], "shortIds": [c["short_id"]]},
                 "xhttpSettings": {"path": c["path"], "mode": "auto"}},
             "sniffing": {"enabled": False}}],
@@ -131,7 +131,7 @@ server {{
         if s.get("panel_path"):
             p = s["panel_path"]
             panel = f"""
-    location = {p} {{ return 302 {p}/; }}
+    location = {p} {{ access_log off; return 302 {p}/; }}
     location ^~ {p}/ {{
         access_log off;
         client_max_body_size 8k;
@@ -140,20 +140,28 @@ server {{
         proxy_set_header Host {domain};
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For "";
+        proxy_set_header X-Forwarded-SSL "";
+        proxy_set_header X-Forwarded-Protocol "";
+        proxy_set_header Forwarded "";
+        proxy_http_version 1.0;
+        proxy_request_buffering on;
         proxy_set_header Connection "";
         proxy_read_timeout 60s;
     }}
 """
             text = "limit_req_zone $binary_remote_addr zone=vless_panel:10m rate=2r/s;\n" + text
         text += f"""server {{
-    listen 127.0.0.1:{fallback} ssl http2 default_server;
+    listen 127.0.0.1:{fallback} ssl http2 proxy_protocol default_server;
     server_name _;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_reject_handshake on;
 }}
 server {{
-    listen 127.0.0.1:{fallback} ssl http2;
+    listen 127.0.0.1:{fallback} ssl http2 proxy_protocol;
     server_name {domain};
+    set_real_ip_from 127.0.0.1;
+    real_ip_header proxy_protocol;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_certificate /etc/letsencrypt/live/{domain}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/{domain}/privkey.pem;
@@ -181,6 +189,12 @@ def write(path, value, private=True):
         if os.name != "nt":
             os.chmod(temporary, 0o600 if private else 0o644)
         os.replace(temporary, path)
+        if os.name == 'posix':
+            directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)

@@ -29,6 +29,12 @@ def write_auth(path, value):
             os.chown(staged, 0, grp.getgrnam('vless-admin').gr_gid)
             os.chmod(staged, 0o640)
         os.replace(staged, path)
+        if os.name == 'posix':
+            directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     finally:
         staged.unlink(missing_ok=True)
 
@@ -79,12 +85,8 @@ def setup(reset=False):
     username, password = read_credentials()
     salt = secrets.token_hex(16)
     s = json.loads(Path('/var/lib/vless-optimized/settings.json').read_text())
-    write(path, dict(username=username, salt=salt, password_hash=password_hash(password, salt),
-                     secret=secrets.token_hex(32), domain=s['domain'], panel_path=s['panel_path']))
-    if os.geteuid() == 0:
-        import grp
-        os.chown(path, 0, grp.getgrnam('vless-admin').gr_gid)
-        os.chmod(path, 0o640)
+    write_auth(path, dict(username=username, salt=salt, password_hash=password_hash(password, salt),
+                         secret=secrets.token_hex(32), version=secrets.token_hex(32), domain=s['domain'], panel_path=s['panel_path']))
 
 
 if __name__ == '__main__':

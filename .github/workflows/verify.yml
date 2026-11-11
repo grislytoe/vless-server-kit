@@ -20,7 +20,8 @@ jobs:
       - name: Install test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-flask gunicorn python3-qrcode python3-pil openssl shellcheck unzip
+          sudo apt-get install -y python3-flask python3-venv python3-qrcode python3-pil openssl shellcheck unzip
+          sudo bash runtime.sh
       - name: Install Nginx using the actual installer package section
         run: |
           sudo env GITHUB_ACTIONS=true /usr/bin/python3 - <<'PY'
@@ -51,7 +52,8 @@ jobs:
           sha256sum --strict -c SHA256SUMS
           bash -n install.sh
           bash -n bootstrap.sh
-          shellcheck -x install.sh bootstrap.sh inputs.sh
+          bash -n runtime.sh
+          shellcheck -x install.sh bootstrap.sh inputs.sh runtime.sh
           if [[ -f start.sh ]]; then
             bash -n start.sh
             shellcheck -x start.sh

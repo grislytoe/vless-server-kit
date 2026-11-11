@@ -31,7 +31,7 @@ import panel_setup
 root = Path({str(root)!r})
 mapping = {{'/etc/vless-panel/admin.json': root / 'admin.json',
            '/var/lib/vless-optimized/settings.json': root / 'settings.json'}}
-with mock.patch.object(panel_setup, 'Path', side_effect=lambda value: mapping[value]), \
+with mock.patch.object(panel_setup, 'Path', side_effect=lambda value: mapping.get(value, Path(value))), \
      mock.patch.object(os, 'geteuid', return_value=1000):
     panel_setup.setup()
     before = (root / 'admin.json').read_bytes()

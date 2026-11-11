@@ -42,7 +42,7 @@ def main():
     run('useradd', '--system', '--user-group', '--no-create-home', '--shell', '/usr/sbin/nologin', 'vless-panel')
     run('useradd', '--system', '--user-group', '--no-create-home', '--shell', '/usr/sbin/nologin', 'xray')
     target.mkdir(mode=0o755)
-    for name in ('config.py', 'admin.py', 'panel.py', 'panel_setup.py'):
+    for name in ('config.py', 'admin.py', 'panel.py', 'panel_setup.py', 'security_state.py'):
         shutil.copyfile(base / name, target / name)
     for name in ('templates', 'static'):
         shutil.copytree(base / name, target / name)

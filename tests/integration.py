@@ -103,6 +103,7 @@ def main():
         nginx = nginx.replace(f"/etc/letsencrypt/live/{s['domain']}/fullchain.pem", cert.as_posix())
         nginx = nginx.replace(f"/etc/letsencrypt/live/{s['domain']}/privkey.pem", key.as_posix())
         nginx = nginx.replace("/var/www/vless-cover", root.as_posix())
+        nginx = nginx.replace('index index.html;', 'index index.html;\nlocation = /whoami { return 200 "$remote_addr"; }')
         (root / "index.html").write_text("local fallback")
         nginx = ("daemon off;\nmaster_process off;\npid logs/nginx.pid;\nerror_log logs/error.log;\n"
                  "events {}\nhttp {\naccess_log logs/access.log;\n"
@@ -124,16 +125,31 @@ def main():
             context.minimum_version = ssl.TLSVersion.TLSv1_3
             context.set_alpn_protocols(["h2"])
             with socket.create_connection(("127.0.0.1", s["fallback_port"])) as raw:
+                raw.sendall(b'PROXY TCP4 127.0.0.1 127.0.0.1 12345 443\r\n')
                 with context.wrap_socket(raw, server_hostname=s["domain"]) as tls:
                     assert tls.selected_alpn_protocol() == "h2"
                     assert tls.version() == "TLSv1.3"
             try:
                 with socket.create_connection(("127.0.0.1", s["fallback_port"])) as raw:
+                    raw.sendall(b'PROXY TCP4 127.0.0.1 127.0.0.1 12345 443\r\n')
                     context.wrap_socket(raw, server_hostname="wrong.example.test")
             except ssl.SSLError:
                 pass
             else:
                 raise AssertionError("Nginx accepted an unauthorized SNI")
+
+            context.set_alpn_protocols(['http/1.1'])
+            with socket.create_connection(('127.0.0.1', s['fallback_port'])) as raw:
+                raw.sendall(b'PROXY TCP4 198.51.100.44 127.0.0.1 12345 443\r\n')
+                with context.wrap_socket(raw, server_hostname=s['domain']) as tls:
+                    tls.sendall(f'GET /whoami HTTP/1.1\r\nHost: {s["domain"]}\r\nConnection: close\r\n\r\n'.encode())
+                    response = b''
+                    while True:
+                        part = tls.recv(4096)
+                        if not part:
+                            break
+                        response += part
+                    assert response.endswith(b'198.51.100.44'), response
 
             http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
             stack.callback(http.server_close)

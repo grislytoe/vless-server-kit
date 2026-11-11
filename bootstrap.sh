@@ -2,17 +2,22 @@
 # Download a complete immutable revision, verify its manifest, then preflight/install.
 # shellcheck source-path=SCRIPTDIR
 set -Eeuo pipefail
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+unset PYTHONPATH PYTHONHOME
 umask 077
 REPOSITORY=grislytoe/vless-server-kit
 REVISION=${VLESS_KIT_REVISION:-}
+ARCHIVE_SHA256=${VLESS_KIT_ARCHIVE_SHA256:-}
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 [[ "$REVISION" =~ ^[0-9a-f]{40}$ ]] || die 'Set VLESS_KIT_REVISION to the reviewed full commit SHA.'
+[[ "$ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]] || die 'Set VLESS_KIT_ARCHIVE_SHA256 to the independently verified archive hash.'
 [[ $EUID -eq 0 ]] || die 'Run with sudo or from a root SSH session.'
 for cmd in curl tar sha256sum python3; do command -v "$cmd" >/dev/null || die "Missing prerequisite: $cmd"; done
 WORK=$(mktemp -d /tmp/vless-kit.XXXXXXXX)
 trap 'rm -rf -- "$WORK"' EXIT
 curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 15 --max-time 180 --retry 3 \
     "https://codeload.github.com/$REPOSITORY/tar.gz/$REVISION" -o "$WORK/kit.tar.gz"
+printf '%s  %s\n' "$ARCHIVE_SHA256" "$WORK/kit.tar.gz" | sha256sum -c -
 tar -xzf "$WORK/kit.tar.gz" --strip-components=1 -C "$WORK"
 cd "$WORK"
 sha256sum --strict -c SHA256SUMS

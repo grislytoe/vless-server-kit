@@ -100,7 +100,7 @@ class PanelTests(unittest.TestCase):
         app = create_app(self.auth, fail)
         client = app.test_client()
         with client.session_transaction(path=self.prefix + '/', base_url='https://vpn.example.com') as session:
-            session.update(authenticated=True, csrf='test')
+            session.update(authenticated=True, csrf='test', sid=app.extensions['security_state'].new_session())
         response = client.get(self.prefix + '/', base_url='https://vpn.example.com')
         self.assertEqual(response.status_code, 503)
         self.assertNotIn('private internal failure', response.get_data(as_text=True))
@@ -149,6 +149,21 @@ class PanelTests(unittest.TestCase):
             self.assertTrue(response.headers['Location'].startswith('https://vpn.example.com/'))
         finally:
             self.app.response_class.autocorrect_location_header = original
+
+    def test_copied_cookie_cannot_be_replayed_after_logout(self):
+        self.login()
+        with self.client.session_transaction(path=self.prefix + '/', base_url='https://vpn.example.com') as values:
+            stolen = dict(values)
+        attacker = self.app.test_client()
+        with attacker.session_transaction(path=self.prefix + '/', base_url='https://vpn.example.com') as values:
+            values.update(stolen)
+        self.assertEqual(attacker.get(self.prefix + '/', base_url='https://vpn.example.com').status_code, 200)
+        self.post('/logout', dict(csrf=self.csrf()))
+        self.assertEqual(attacker.get(self.prefix + '/', base_url='https://vpn.example.com').status_code, 302)
+
+    def test_plaintext_and_static_traversal_rejected(self):
+        self.assertEqual(self.client.get(self.prefix + '/login', base_url='http://vpn.example.com').status_code, 400)
+        self.assertEqual(self.get('/static/../panel.py').status_code, 404)
 
     def test_change_password_form_and_session_revocation(self):
         self.assertEqual(self.get('/password').status_code, 302)

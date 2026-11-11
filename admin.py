@@ -98,7 +98,8 @@ class Manager:
             transaction.unlink()
 
     def dispatch(self, request):
-        with open('/run/lock/vless-optimized.lock', 'a') as lock:
+        fd = os.open('/run/vless-optimized-lock/install.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'a') as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
@@ -161,7 +162,7 @@ def serve():
         while True:
             conn, _ = listener.accept()
             with conn:
-                conn.settimeout(65)
+                conn.settimeout(5)
                 _, uid, _ = struct.unpack('3i', conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
                 if uid not in (0, expected_uid):
                     continue
@@ -174,8 +175,8 @@ def serve():
                     response = dict(error='Invalid request or key.')
                 except Exception:
                     # Details belong in root's journal, never in public HTTP responses.
-                    import traceback
-                    traceback.print_exc()
+                    # Do not include request data / credentials in exception logs.
+                    print('Local manager operation failed.', flush=True)
                     response = dict(error='Apply failed; inspect journalctl -u vless-admin.')
                 try:
                     conn.sendall(json.dumps(response).encode() + b'\n')
