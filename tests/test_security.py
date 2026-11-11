@@ -11,6 +11,18 @@ from security_state import SecurityState
 
 
 class DurableSecurityTests(unittest.TestCase):
+    def test_password_hash_migration_keeps_legacy_credentials_valid(self):
+        from panel_setup import password_hash, verify_password
+        salt = 'ab' * 16
+        old = dict(salt=salt, password_hash=password_hash('legacy password test', salt))
+        new = dict(salt=salt, password_hash=password_hash('new password test', salt, 32768, 3),
+                   scrypt_n=32768, scrypt_p=3)
+        self.assertTrue(verify_password('legacy password test', old))
+        self.assertTrue(verify_password('new password test', new))
+        self.assertFalse(verify_password('incorrect password', new))
+        with self.assertRaises(ValueError):
+            password_hash('test', salt, 2 ** 30, 1)
+
     def test_sessions_and_attempts_survive_restart_and_expire(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'security.sqlite3'

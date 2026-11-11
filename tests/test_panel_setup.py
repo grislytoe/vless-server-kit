@@ -37,7 +37,7 @@ with mock.patch.object(panel_setup, 'Path', side_effect=lambda value: mapping.ge
     before = (root / 'admin.json').read_bytes()
     auth = json.loads(before)
     assert auth['username'] == 'admin-tty'
-    assert auth['password_hash'] == panel_setup.password_hash({password!r}, auth['salt'])
+    assert auth['password_hash'] == panel_setup.password_hash({password!r}, auth['salt'], 32768, 3)
     assert {password!r} not in before.decode()
     panel_setup.setup()
     assert before == (root / 'admin.json').read_bytes()

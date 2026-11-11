@@ -10,12 +10,11 @@ from pathlib import Path
 import secrets
 import socket
 import threading
-import time
 import uuid
 
 from flask import Flask, abort, flash, g, jsonify, redirect, render_template, request, send_file, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
-from panel_setup import password_hash
+from panel_setup import verify_password
 from security_state import SecurityState
 
 
@@ -120,7 +119,7 @@ def create_app(auth=None, transport=rpc):
             if len(password) > 256:
                 abort(400)
             current_auth = g.admin_auth
-            valid_password = hmac.compare_digest(password_hash(password, current_auth['salt']), current_auth['password_hash'])
+            valid_password = verify_password(password, current_auth)
             if valid_password and hmac.compare_digest(request.form.get('username', '').encode(), current_auth['username'].encode()):
                 state.revoke(session.get('sid'))
                 session.clear()

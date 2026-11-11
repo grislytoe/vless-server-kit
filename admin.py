@@ -4,7 +4,6 @@ import argparse
 import copy
 import json
 import os
-import hmac
 import secrets
 from pathlib import Path
 import socket
@@ -20,7 +19,7 @@ if os.name == 'posix':
     import pwd
 
 from config import client_url, server_config, validate, validate_credentials, write
-from panel_setup import password_hash, write_auth
+from panel_setup import password_hash, verify_password, write_auth
 
 STATE = Path('/var/lib/vless-optimized')
 CONFIG = Path('/usr/local/etc/xray/config.json')
@@ -112,10 +111,11 @@ class Manager:
             if not isinstance(current, str) or not isinstance(password, str) or not 16 <= len(password) <= 256 or len(current) > 256:
                 return dict(ok=False, error='invalid_password')
             auth = load(self.auth_path)
-            if not hmac.compare_digest(password_hash(current, auth['salt']), auth['password_hash']):
+            if not verify_password(current, auth):
                 return dict(ok=False, error='wrong_password')
             salt = secrets.token_hex(16)
-            auth.update(salt=salt, password_hash=password_hash(password, salt), version=secrets.token_hex(32))
+            auth.update(salt=salt, password_hash=password_hash(password, salt, 32768, 3),
+                        scrypt_n=32768, scrypt_p=3, version=secrets.token_hex(32))
             write_auth(self.auth_path, auth)
             return dict(ok=True)
         self.recover()

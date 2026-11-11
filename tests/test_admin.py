@@ -114,7 +114,8 @@ class AdminTests(unittest.TestCase):
         new_password = 'new-test-password-456'
         self.assertTrue(self.manager._dispatch(dict(action='change_password', current_password=password, new_password=new_password))['ok'])
         saved = json.loads(path.read_text())
-        self.assertEqual(saved['password_hash'], password_hash(new_password, saved['salt']))
+        self.assertEqual((saved['scrypt_n'], saved['scrypt_p']), (32768, 3))
+        self.assertEqual(saved['password_hash'], password_hash(new_password, saved['salt'], 32768, 3))
         self.assertEqual(saved['secret'], auth['secret'])
         self.assertEqual(saved['username'], auth['username'])
         self.assertTrue(saved['version'])

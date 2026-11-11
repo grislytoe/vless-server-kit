@@ -153,7 +153,7 @@ server {{
             assert request('POST', '/login', dict(csrf=csrf, username='test-admin', password=password))[0] == 200
             assert request('POST', '/login', dict(csrf=csrf, username='test-admin', password=new_password))[0] == 303
             saved_auth = json.loads((authdir / 'admin.json').read_text())
-            assert saved_auth['password_hash'] == password_hash(new_password, saved_auth['salt'])
+            assert saved_auth['password_hash'] == password_hash(new_password, saved_auth['salt'], 32768, 3)
             assert (authdir / 'admin.json').stat().st_mode & 0o777 == 0o640
             run('systemctl', 'is-active', '--quiet', 'xray', 'vless-admin', 'vless-panel', 'nginx')
             print('PASS: real systemd units, nonroot panel, Unix socket permissions, Nginx HTTPS, login, add, QR, deactivate, delete.')

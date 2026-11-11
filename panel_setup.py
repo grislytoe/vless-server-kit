@@ -3,6 +3,7 @@
 import argparse
 import getpass
 import hashlib
+import hmac
 import os
 from pathlib import Path
 import re
@@ -13,8 +14,17 @@ from config import write
 import json
 
 
-def password_hash(password, salt):
-    return hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=16384, r=8, p=1, dklen=32).hex()
+def password_hash(password, salt, n=16384, p=1):
+    # Defaults read existing installations; new credentials use the stronger tuple.
+    if (n, p) not in ((16384, 1), (32768, 3)):
+        raise ValueError('Unsupported password hash parameters')
+    return hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=n, r=8, p=p,
+                          maxmem=128 * 1024 * 1024, dklen=32).hex()
+
+
+def verify_password(password, auth):
+    return hmac.compare_digest(password_hash(password, auth['salt'],
+        auth.get('scrypt_n', 16384), auth.get('scrypt_p', 1)), auth['password_hash'])
 
 
 def write_auth(path, value):
@@ -85,7 +95,8 @@ def setup(reset=False):
     username, password = read_credentials()
     salt = secrets.token_hex(16)
     s = json.loads(Path('/var/lib/vless-optimized/settings.json').read_text())
-    write_auth(path, dict(username=username, salt=salt, password_hash=password_hash(password, salt),
+    write_auth(path, dict(username=username, salt=salt, password_hash=password_hash(password, salt, 32768, 3),
+                         scrypt_n=32768, scrypt_p=3,
                          secret=secrets.token_hex(32), version=secrets.token_hex(32), domain=s['domain'], panel_path=s['panel_path']))
 
 

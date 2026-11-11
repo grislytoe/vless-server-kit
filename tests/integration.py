@@ -188,6 +188,21 @@ def main():
             assert again == PAYLOAD
             assert SOURCES and set(SOURCES) == {"127.0.0.2"}, SOURCES
             udp_probe(socks, resolvers=('127.0.0.1',), dns_port=dns_port)
+            private = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+            stack.callback(private.server_close)
+            stack.callback(private.shutdown)
+            threading.Thread(target=private.serve_forever, daemon=True).start()
+            private_port = private.server_address[1]
+            # A reachable private service outside the precise test exceptions
+            # must stay inaccessible through VLESS, including DNS resolution.
+            import urllib.request
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+                    f'http://127.0.0.1:{private_port}/data', timeout=5) as direct:
+                assert direct.read() == PAYLOAD
+            for target in ('127.0.0.1', 'localhost'):
+                blocked = subprocess.run(curl + ['--max-time', '4',
+                    f'http://{target}:{private_port}/data'], capture_output=True)
+                assert blocked.returncode != 0, 'Tunnel reached a private service'
             # Add a second real client, then revoke it by replacing/restarting server config.
             other_port = available_port()
             write(root / 'other.json', client_config(s, other, socks_port=other_port, address=s['inbound_ip']))
@@ -204,7 +219,7 @@ def main():
             assert denied.returncode != 0, 'Revoked client still connects'
             assert subprocess.run(curl + [url], capture_output=True, check=True).stdout == PAYLOAD
             print("PASS: real Nginx config, TLS1.3/H2, wrong SNI rejection, real XHTTP/REALITY,")
-            print("4 MiB download + upload, UDP, two clients, revocation rejected, remaining client works, outbound source IP.")
+            print("4 MiB download + upload, UDP, private destination denial, two clients, revocation rejected, remaining client works, outbound source IP.")
         except Exception:
             log.flush()
             print((root / "process.log").read_text(errors="replace"), file=sys.stderr)
