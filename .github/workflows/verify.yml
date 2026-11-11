@@ -23,7 +23,7 @@ jobs:
           sudo apt-get install -y python3-flask gunicorn python3-qrcode python3-pil openssl shellcheck unzip
       - name: Install Nginx using the actual installer package section
         run: |
-          sudo /usr/bin/python3 - <<'PY'
+          sudo env GITHUB_ACTIONS=true /usr/bin/python3 - <<'PY'
           import os, pathlib, subprocess, tempfile
           assert os.environ.get('GITHUB_ACTIONS') == 'true'
           source = pathlib.Path('install.sh').read_text()
