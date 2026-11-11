@@ -13,7 +13,8 @@ import threading
 import time
 import uuid
 
-from flask import Flask, abort, flash, redirect, render_template, request, send_file, session, url_for
+from flask import Flask, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
+from werkzeug.middleware.proxy_fix import ProxyFix
 from panel_setup import password_hash
 
 
@@ -53,12 +54,24 @@ class LoginLimiter:
 def create_app(auth=None, transport=rpc):
     auth = auth or json.loads(Path('/etc/vless-panel/admin.json').read_text())
     app = Flask(__name__, static_url_path=auth['panel_path'] + '/static')
+    # Gunicorn accepts only the local Nginx Unix socket. Trust its fixed HTTPS
+    # scheme header, keeping host/address headers outside this trust boundary.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=0, x_proto=1, x_host=0, x_port=0, x_prefix=0)
     prefix = auth['panel_path']
     app.config.update(SECRET_KEY=auth['secret'], SESSION_COOKIE_NAME='vless_admin',
         SESSION_COOKIE_PATH=prefix + '/', SESSION_COOKIE_SECURE=True, SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE='Strict', PERMANENT_SESSION_LIFETIME=timedelta(minutes=30),
         SESSION_REFRESH_EACH_REQUEST=False, MAX_CONTENT_LENGTH=8192)
     limiter = LoginLimiter()
+    operations, operation_lock = OrderedDict(), threading.Lock()
+
+    def operation_result(identifier):
+        with operation_lock:
+            value = operations.get(identifier)
+            if value is None or value['owner'] != session['csrf']:
+                return None
+            return dict(status=value['status'], message=value['message'])
+
 
     @app.before_request
     def security():
@@ -117,14 +130,14 @@ def create_app(auth=None, transport=rpc):
                 session.clear()
                 session.update(authenticated=True, csrf=secrets.token_urlsafe(32))
                 session.permanent = True
-                return redirect(url_for('index'))
+                return redirect(url_for('index'), code=303)
             error = 'Неверный логин или пароль.'
         return render_template('login.html', error=error)
 
     @app.post(prefix + '/logout')
     def logout():
         session.clear()
-        return redirect(url_for('login'))
+        return redirect(url_for('login'), code=303)
 
     @app.get(prefix + '/')
     @login_required
@@ -133,7 +146,16 @@ def create_app(auth=None, transport=rpc):
             clients = transport(dict(action='list'))
         except (OSError, RuntimeError):
             return render_template('error.html'), 503
-        return render_template('index.html', clients=clients, domain=auth['domain'])
+        result = operation_result(request.args.get('operation', ''))
+        return render_template('index.html', clients=clients, domain=auth['domain'], operation=result)
+
+    @app.get(prefix + '/operation/<uuid:identifier>')
+    @login_required
+    def operation_status(identifier):
+        result = operation_result(str(identifier))
+        if result is None:
+            abort(404)
+        return jsonify(result)
 
     @app.post(prefix + '/add')
     @login_required
@@ -144,12 +166,37 @@ def create_app(auth=None, transport=rpc):
         return mutate(dict(action='add', name=name))
 
     def mutate(message):
+        identifier = request.form.get('operation_id')
+        if identifier:
+            try:
+                identifier = str(uuid.UUID(identifier))
+            except ValueError:
+                abort(400)
+            with operation_lock:
+                if identifier in operations:
+                    abort(409)
+                if len(operations) >= 256:
+                    completed = next((k for k, v in operations.items() if v['status'] != 'pending'), None)
+                    if completed is None:
+                        abort(503)
+                    operations.pop(completed)
+                operations[identifier] = dict(owner=session['csrf'], status='pending', message='Применяем изменения…')
         try:
             transport(message)
-            flash('Изменения применены. VPN-соединения могут переподключиться.')
+            if message['action'] == 'add':
+                notice = f'Ключ «{message["name"]}» создан. Ссылка и QR доступны в списке ниже.'
+            else:
+                notice = 'Изменения применены. VPN-соединения могут переподключиться.'
+            status = 'success'
         except (OSError, RuntimeError):
-            flash('Изменения не применены. Проверьте журнал vless-admin на сервере.')
-        return redirect(url_for('index'))
+            notice = 'Не удалось подтвердить применение. Проверьте список ключей и журнал vless-admin перед повтором.'
+            status = 'error'
+        if identifier:
+            with operation_lock:
+                operations[identifier].update(status=status, message=notice)
+            return jsonify(status=status)
+        flash(notice)
+        return redirect(url_for('index'), code=303)
 
     @app.post(prefix + '/key/<uuid:key_id>/<action>')
     @login_required

@@ -122,23 +122,26 @@ server {{
                     cookie = response.getheader('Set-Cookie').split(';', 1)[0]
                 payload = response.read()
                 status = response.status
+                if status in (302, 303):
+                    location = response.getheader('Location')
+                    assert location.startswith('/') or location.startswith('https://' + s['domain'] + '/'), 'Unsafe redirect scheme'
                 conn.close()
                 return status, payload
             status, html = request('GET', '/login')
             assert status == 200, status
             csrf = re.search(rb'name="csrf" value="([^"]+)"', html)[1].decode()
-            assert request('POST', '/login', dict(csrf=csrf, username='test-admin', password=password))[0] == 302
+            assert request('POST', '/login', dict(csrf=csrf, username='test-admin', password=password))[0] == 303
             status, html = request('GET', '/')
             assert status == 200, status
             csrf = re.search(rb'name="csrf" value="([^"]+)"', html)[1].decode()
-            assert request('POST', '/add', dict(csrf=csrf, name='Service test'))[0] == 302
+            assert request('POST', '/add', dict(csrf=csrf, name='Service test'))[0] == 303
             keys = rpc(dict(action='list'))
             assert len(keys) == 2
             status, png = request('GET', '/key/' + keys[1]['id'] + '/qr.png')
             assert status == 200 and png.startswith(b'\x89PNG')
-            assert request('POST', '/key/' + keys[0]['id'] + '/deactivate', dict(csrf=csrf))[0] == 302
+            assert request('POST', '/key/' + keys[0]['id'] + '/deactivate', dict(csrf=csrf))[0] == 303
             assert not rpc(dict(action='list'))[0]['active']
-            assert request('POST', '/key/' + keys[1]['id'] + '/delete', dict(csrf=csrf))[0] == 302
+            assert request('POST', '/key/' + keys[1]['id'] + '/delete', dict(csrf=csrf))[0] == 303
             assert json.loads((directory / 'config.json').read_text())['inbounds'][0]['settings']['clients'] == []
             run('systemctl', 'is-active', '--quiet', 'xray', 'vless-admin', 'vless-panel', 'nginx')
             print('PASS: real systemd units, nonroot panel, Unix socket permissions, Nginx HTTPS, login, add, QR, deactivate, delete.')

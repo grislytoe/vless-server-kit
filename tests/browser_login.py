@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from panel import create_app
@@ -26,7 +27,15 @@ def main():
     password, salt = secrets.token_urlsafe(32), secrets.token_hex(16)
     auth = dict(username='browser-test', salt=salt, secret=secrets.token_hex(32),
                 password_hash=password_hash(password, salt), domain=f'127.0.0.1:{port}', panel_path=prefix)
-    app = create_app(auth, lambda message: [] if message['action'] == 'list' else {'ok': True})
+    clients = []
+    def transport(message):
+        if message['action'] == 'list':
+            return clients
+        if message['action'] == 'add':
+            clients.append(dict(id=str(uuid.uuid4()), name=message['name'], active=True,
+                                created='2026-11-11', link='vless://test-only@example.com'))
+        return {'ok': True}
+    app = create_app(auth, transport)
     policies, origins, results = {'legacy': False}, [], []
 
     @app.after_request
@@ -43,6 +52,9 @@ def main():
         def headers(status, values, exc_info=None):
             if policies['legacy']:
                 values = [(k, 'no-referrer' if k.lower() == 'referrer-policy' else v) for k, v in values]
+            # Simulate the front proxy losing the completed mutation response.
+            if environ.get('PATH_INFO', '').endswith('/add'):
+                status = '502 Bad Gateway'
             return start_response(status, values, exc_info)
         return actual(environ, headers)
     app.wsgi_app = wrapped
@@ -70,12 +82,17 @@ def main():
                             assert origins[-1] == 'null' and results[-1] == 403
                             assert page.get_by_role('heading', name='Не удалось подтвердить источник запроса').is_visible()
                         else:
-                            assert origins[-1] == f'https://127.0.0.1:{port}' and results[-1] == 302
+                            assert origins[-1] == f'https://127.0.0.1:{port}' and results[-1] == 303
                             assert page.get_by_role('heading', name='Ключи подключения').is_visible()
                             page.get_by_label('Название устройства').fill('Browser device')
                             with page.expect_navigation():
                                 page.get_by_role('button', name='Создать ключ', exact=True).click()
-                            assert results[-1] == 302
+                            assert results[-1] == 200
+                            assert page.url.startswith(f'https://127.0.0.1:{port}{prefix}/?operation=')
+                            assert page.get_by_role('heading', name='Browser device', exact=True).is_visible()
+                            assert 'создан' in page.locator('#operation-status').inner_text()
+                            page.reload()
+                            assert len(clients) == 1
                             with page.expect_navigation():
                                 page.get_by_role('button', name='Выйти', exact=True).click()
                             assert page.get_by_role('heading', name='Управление VPN').is_visible()

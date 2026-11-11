@@ -47,7 +47,7 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(self.get('/').status_code, 302)
         self.assertEqual(self.get(f'/key/{self.keys[0]["id"]}/qr.png').status_code, 302)
         self.assertEqual(self.post('/add', dict(name='No csrf')).status_code, 403)
-        self.assertEqual(self.login().status_code, 302)
+        self.assertEqual(self.login().status_code, 303)
         response = self.get('/')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers['Cache-Control'], 'no-store')
@@ -74,10 +74,10 @@ class PanelTests(unittest.TestCase):
         self.assertIn('attachment', response.headers['Content-Disposition'])
         self.assertEqual(self.get(f'/key/{self.keys[1]["id"]}/qr.png').status_code, 404)
         for path, fields in (('/add', dict(name='ПК')), (f'/key/{key}/deactivate', {}), (f'/key/{key}/delete', {})):
-            self.assertEqual(self.post(path, dict(csrf=self.csrf(), **fields)).status_code, 302)
+            self.assertEqual(self.post(path, dict(csrf=self.csrf(), **fields)).status_code, 303)
         self.assertEqual([m['action'] for m in self.messages], ['list', 'list', 'add', 'deactivate', 'delete'])
         self.assertEqual(self.get(f'/key/{key}/delete').status_code, 405)
-        self.assertEqual(self.post('/logout', dict(csrf=self.csrf())).status_code, 302)
+        self.assertEqual(self.post('/logout', dict(csrf=self.csrf())).status_code, 303)
         self.assertEqual(self.get('/').status_code, 302)
 
     def test_login_throttles_and_rejects_wrong_host(self):
@@ -110,13 +110,40 @@ class PanelTests(unittest.TestCase):
         self.assertIn('cookie', response.get_data(as_text=True))
         new_token = re.search(r'name="csrf" value="([^"]+)"', response.get_data(as_text=True))[1]
         self.assertNotEqual(old_token, new_token)
-        self.assertEqual(self.post('/login', dict(csrf=new_token, username='admin', password=self.password)).status_code, 302)
+        self.assertEqual(self.post('/login', dict(csrf=new_token, username='admin', password=self.password)).status_code, 303)
 
     def test_static_assets_do_not_create_sessions(self):
         response = self.get('/static/panel.css')
         self.assertEqual(response.status_code, 200)
         self.assertNotIn('Set-Cookie', response.headers)
         response.close()
+
+    def test_operation_survives_lost_response_without_duplicate_creation(self):
+        self.login()
+        identifier = str(uuid.uuid4())
+        data = dict(csrf=self.csrf(), name='Laptop', operation_id=identifier)
+        self.assertEqual(self.post('/add', data).status_code, 200)
+        result = self.get('/operation/' + identifier)
+        self.assertEqual(result.json['status'], 'success')
+        self.assertIn('Laptop', result.json['message'])
+        self.assertEqual(self.post('/add', data).status_code, 409)
+        self.assertEqual(sum(m['action'] == 'add' for m in self.messages), 1)
+        response = self.get('/?operation=' + identifier)
+        self.assertIn('Laptop', response.get_data(as_text=True))
+
+    def test_redirect_keeps_https_behind_proxy(self):
+        self.get('/login')
+        # Ubuntu 22.04's Werkzeug automatically makes Location absolute.
+        original = self.app.response_class.autocorrect_location_header
+        self.app.response_class.autocorrect_location_header = True
+        try:
+            response = self.client.post(self.prefix + '/login', base_url='http://vpn.example.com',
+                headers={'X-Forwarded-Proto': 'https'},
+                data=dict(csrf=self.csrf(), username='admin', password=self.password))
+            self.assertEqual(response.status_code, 303)
+            self.assertTrue(response.headers['Location'].startswith('https://vpn.example.com/'))
+        finally:
+            self.app.response_class.autocorrect_location_header = original
 
 
 if __name__ == '__main__':
