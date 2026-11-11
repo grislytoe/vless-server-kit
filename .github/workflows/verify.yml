@@ -66,7 +66,7 @@ jobs:
         run: |
           sudo apt-get install -y python3-venv
           /usr/bin/python3 -m venv --system-site-packages /tmp/vless-browser
-          /tmp/vless-browser/bin/pip install playwright==1.56.0
+          /tmp/vless-browser/bin/pip install playwright==1.56.0 zxing-cpp==2.3.0
           /tmp/vless-browser/bin/python -m playwright install --with-deps chromium
           /tmp/vless-browser/bin/python tests/browser_login.py
       - name: Verify launcher release download

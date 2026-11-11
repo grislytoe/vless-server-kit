@@ -217,9 +217,14 @@ def create_app(auth=None, transport=rpc):
         if client is None:
             abort(404)
         output = io.BytesIO()
-        qrcode.make(client['link']).save(output, format='PNG')
+        preview = request.args.get('preview') == '1'
+        code = qrcode.QRCode(box_size=2 if preview else 8, border=4,
+                             error_correction=qrcode.constants.ERROR_CORRECT_M)
+        code.add_data(client['link'])
+        code.make(fit=True)
+        code.make_image(fill_color='black', back_color='white').save(output, format='PNG')
         output.seek(0)
-        return send_file(output, mimetype='image/png', as_attachment=True,
+        return send_file(output, mimetype='image/png', as_attachment=not preview,
                          download_name=f'happ-{key_id}.png', max_age=0)
 
     return app

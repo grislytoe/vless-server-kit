@@ -1,7 +1,7 @@
 {% extends 'base.html' %}{% block content %}
 <header><div><p class="eyebrow">{{ domain }}</p><h1>Ключи подключения</h1></div>
 <form action="{{ url_for('logout') }}" method="post"><input type="hidden" name="csrf" value="{{ session.csrf }}"><button class="secondary">Выйти</button></form></header>
-<p class="muted">{{ clients | selectattr('active') | list | length }} активных · {{ clients | length }} всего</p>
+<p class="muted" id="client-count">{{ clients | selectattr('active') | list | length }} активных · {{ clients | length }} всего</p>
 <p id="operation-status" role="status" data-panel="{{ url_for('index') }}">{% if operation %}{{ operation.message }}{% endif %}</p>
 {% for message in get_flashed_messages() %}<p role="status" class="notice">{{ message }}</p>{% endfor %}
 <section><h2>Новое подключение</h2><form class="add" action="{{ url_for('add') }}" method="post">
@@ -10,7 +10,8 @@
 <div class="keys">{% for client in clients %}<article><div class="key-heading"><h2>{{ client.name }}</h2><span class="badge {% if not client.active %}inactive{% endif %}">{{ 'Активен' if client.active else 'Отключён' }}</span></div>
 <p class="muted small">Создан: {{ client.created[:19] | replace('T', ' ') }} UTC</p>
 {% if client.active %}<label>Ссылка для HAPP<input class="link" readonly id="key-{{ client.id }}" value="{{ client.link }}"></label>
-<div class="actions"><button class="secondary" type="button" data-copy="key-{{ client.id }}">Копировать ссылку</button><a class="button secondary" href="{{ url_for('qr', key_id=client.id) }}">Скачать QR</a></div>{% endif %}
+<div class="actions"><button class="secondary" type="button" data-copy="key-{{ client.id }}">Копировать ссылку</button></div>
+<div class="actions qr-actions"><img class="qr-preview" src="{{ url_for('qr', key_id=client.id, preview='1') }}" alt="QR подключения {{ client.name }}" loading="lazy"><a class="button secondary" href="{{ url_for('qr', key_id=client.id) }}">Скачать QR</a></div>{% endif %}
 <div class="actions">{% if client.active %}<form method="post" action="{{ url_for('update', key_id=client.id, action='deactivate') }}" data-confirm="Отключить этот ключ? Подключённые устройства потеряют доступ."><input type="hidden" name="csrf" value="{{ session.csrf }}"><button class="danger">Деактивировать</button></form>{% endif %}
 <form method="post" action="{{ url_for('update', key_id=client.id, action='delete') }}" data-confirm="Удалить ключ навсегда? Доступ будет отозван."><input type="hidden" name="csrf" value="{{ session.csrf }}"><button class="danger">Удалить</button></form></div>
 </article>{% else %}<section><h2>Ключей пока нет</h2><p>Создайте первое подключение выше.</p></section>{% endfor %}</div>

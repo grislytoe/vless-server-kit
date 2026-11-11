@@ -7,13 +7,17 @@ import sys
 import tempfile
 import threading
 import uuid
+import io
+from PIL import Image
+import zxingcpp
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from panel import create_app
 from panel_setup import password_hash
 from probe import available_port
 from werkzeug.serving import make_server, WSGIRequestHandler
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
+from config import DEFAULTS, client_url
 
 
 class QuietHandler(WSGIRequestHandler):
@@ -32,8 +36,15 @@ def main():
         if message['action'] == 'list':
             return clients
         if message['action'] == 'add':
-            clients.append(dict(id=str(uuid.uuid4()), name=message['name'], active=True,
-                                created='2026-11-11', link='vless://test-only@example.com'))
+            key_id = str(uuid.uuid4())
+            credentials = dict(uuid=key_id, private_key=secrets.token_urlsafe(32), public_key=secrets.token_urlsafe(32),
+                               short_id=secrets.token_hex(8), path='/api/v2/session/' + secrets.token_hex(16))
+            clients.append(dict(id=key_id, name=message['name'], active=True,
+                                created='2026-11-11', link=client_url(DEFAULTS, credentials, message['name'])))
+        elif message['action'] == 'deactivate':
+            next(v for v in clients if v['id'] == message['id'])['active'] = False
+        elif message['action'] == 'delete':
+            clients[:] = [v for v in clients if v['id'] != message['id']]
         return {'ok': True}
     app = create_app(auth, transport)
     policies, origins, results = {'legacy': False}, [], []
@@ -84,15 +95,40 @@ def main():
                         else:
                             assert origins[-1] == f'https://127.0.0.1:{port}' and results[-1] == 303
                             assert page.get_by_role('heading', name='Ключи подключения').is_visible()
+                            navigations = []
+                            page.on('framenavigated', lambda frame: navigations.append(frame.url) if frame == page.main_frame else None)
+                            original_url = page.url
                             page.get_by_label('Название устройства').fill('Browser device')
-                            with page.expect_navigation():
-                                page.get_by_role('button', name='Создать ключ', exact=True).click()
+                            page.get_by_role('button', name='Создать ключ', exact=True).click()
+                            expect(page.get_by_role('heading', name='Browser device', exact=True)).to_be_visible()
+                            expect(page.get_by_role('button', name='Создать ключ', exact=True)).to_be_enabled()
                             assert results[-1] == 200
-                            assert page.url.startswith(f'https://127.0.0.1:{port}{prefix}/?operation=')
-                            assert page.get_by_role('heading', name='Browser device', exact=True).is_visible()
                             assert 'создан' in page.locator('#operation-status').inner_text()
-                            page.reload()
+                            expect(page.locator('#client-count')).to_have_text('1 активных · 1 всего')
+                            preview = page.locator('img.qr-preview')
+                            expect(preview).to_be_visible()
+                            decoded = zxingcpp.read_barcode(Image.open(io.BytesIO(preview.screenshot())))
+                            assert decoded is not None and decoded.text == clients[0]['link']
+                            download = page.get_by_role('link', name='Скачать QR')
+                            assert download.is_visible()
                             assert len(clients) == 1
+                            page.once('dialog', lambda dialog: dialog.accept())
+                            page.get_by_role('button', name='Деактивировать', exact=True).click()
+                            expect(page.locator('.badge')).to_have_text('Отключён')
+                            expect(page.locator('img.qr-preview')).to_have_count(0)
+                            expect(page.locator('#client-count')).to_have_text('0 активных · 1 всего')
+                            expect(page.get_by_role('button', name='Удалить', exact=True)).to_be_enabled()
+                            page.once('dialog', lambda dialog: dialog.accept())
+                            page.get_by_role('button', name='Удалить', exact=True).click()
+                            expect(page.get_by_role('heading', name='Ключей пока нет')).to_be_visible()
+                            expect(page.locator('#client-count')).to_have_text('0 активных · 0 всего')
+                            expect(page.get_by_role('button', name='Создать ключ', exact=True)).to_be_enabled()
+                            assert page.url == original_url and navigations == []
+                            # Event delegation must also work after replacing the list.
+                            page.get_by_label('Название устройства').fill('Second device')
+                            page.get_by_role('button', name='Создать ключ', exact=True).click()
+                            expect(page.get_by_role('heading', name='Second device', exact=True)).to_be_visible()
+                            expect(page.get_by_role('button', name='Выйти', exact=True)).to_be_enabled()
                             with page.expect_navigation():
                                 page.get_by_role('button', name='Выйти', exact=True).click()
                             assert page.get_by_role('heading', name='Управление VPN').is_visible()
@@ -102,7 +138,7 @@ def main():
         finally:
             server.shutdown()
             server.server_close()
-    print('PASS: Chromium reproduces Origin:null with no-referrer; same-origin fixes native login, add and logout forms.')
+    print('PASS: native login, lost mutation response, live add/deactivate/delete without navigation, scan rendered QR thumbnail, logout.')
 
 
 if __name__ == '__main__':

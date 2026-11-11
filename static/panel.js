@@ -34,9 +34,21 @@ document.addEventListener('submit', async (event) => {
       if (!response.ok) continue;
       const result = await response.json();
       if (result.status === 'pending') continue;
+      // Refresh only list/count; keep the document, focus and page URL intact.
       const target = new URL(status.dataset.panel, location.origin);
       target.searchParams.set('operation', id);
-      location.replace(target.href);
+      const updated = await fetch(target.href, {cache: 'no-store', credentials: 'same-origin'});
+      if (!updated.ok) continue;
+      const documentUpdate = new DOMParser().parseFromString(await updated.text(), 'text/html');
+      const keys = documentUpdate.querySelector('.keys');
+      const count = documentUpdate.getElementById('client-count');
+      if (!keys || !count) continue;
+      document.querySelector('.keys').replaceWith(keys);
+      document.getElementById('client-count').replaceWith(count);
+      status.textContent = result.message;
+      if (result.status === 'success' && form.matches('.add')) form.reset();
+      delete form.dataset.pending;
+      document.querySelectorAll('button').forEach(button => { button.disabled = false; });
       return;
     } catch { /* Wait for the management connection to recover. */ }
   }
