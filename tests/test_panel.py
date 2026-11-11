@@ -40,7 +40,8 @@ class PanelTests(unittest.TestCase):
 
     def login(self):
         self.get('/login')
-        return self.post('/login', dict(csrf=self.csrf(), username='admin', password=self.password))
+        return self.post('/login', dict(csrf=self.csrf(), username='admin', password=self.password),
+                         headers={'Origin': 'https://vpn.example.com'})
 
     def test_authentication_csrf_and_cookie_flags(self):
         self.assertEqual(self.get('/').status_code, 302)

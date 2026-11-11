@@ -115,6 +115,7 @@ server {{
                 if data is not None:
                     body = urlencode(data)
                     headers['Content-Type'] = 'application/x-www-form-urlencoded'
+                    headers['Origin'] = 'https://' + s['domain']
                 conn.request(method, s['panel_path'] + path, body, headers)
                 response = conn.getresponse()
                 if response.getheader('Set-Cookie'):
