@@ -63,6 +63,10 @@ if [s['domain'], s['inbound_ip'], s['outbound_ip']] != sys.argv[2:]:
 PY
     MANAGED=true
 else
+    for account in xray vless-panel; do
+        if getent passwd "$account" >/dev/null; then die "Reserved account $account already exists; inspect before first installation."; fi
+    done
+    if getent group vless-admin >/dev/null; then die 'Reserved vless-admin group already exists; inspect its members.'; fi
     [[ ! -e /etc/nginx/nginx.conf && ! -e "$CONFIG" && ! -e "$UNIT" && ! -e "$BIN" ]] \
         || die 'Existing Nginx/Xray found. Inspect and migrate manually; this installer is for a clean VPS.'
     if systemctl cat xray.service >/dev/null 2>&1; then die 'Existing Xray service found.'; fi

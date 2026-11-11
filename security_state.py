@@ -1,5 +1,6 @@
 """Private, durable session revocation and brute-force counters. Stdlib only."""
 import hashlib
+import os
 import secrets
 import sqlite3
 import threading
@@ -10,6 +11,8 @@ class SecurityState:
     def __init__(self, path=':memory:', clock=time.time):
         self.clock, self.lock = clock, threading.RLock()
         self.db = sqlite3.connect(str(path), timeout=5, check_same_thread=False)
+        if str(path) != ':memory:' and os.name == 'posix':
+            os.chmod(path, 0o600)
         with self.db:
             self.db.execute('CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, expires REAL NOT NULL)')
             self.db.execute('CREATE TABLE IF NOT EXISTS attempts (key TEXT NOT NULL, timestamp REAL NOT NULL)')
