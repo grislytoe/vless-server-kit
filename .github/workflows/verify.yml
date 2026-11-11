@@ -20,7 +20,19 @@ jobs:
       - name: Install test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-flask gunicorn python3-qrcode python3-pil nginx openssl shellcheck unzip
+          sudo apt-get install -y python3-flask gunicorn python3-qrcode python3-pil openssl shellcheck unzip
+      - name: Install Nginx using the actual installer package section
+        run: |
+          sudo /usr/bin/python3 - <<'PY'
+          import os, pathlib, subprocess, tempfile
+          assert os.environ.get('GITHUB_ACTIONS') == 'true'
+          source = pathlib.Path('install.sh').read_text()
+          begin = source.index('if [[ "$ID:$VERSION_ID" == ubuntu:22.04 ]]; then')
+          end = source.index('if [[ -n "$XRAY_ARCHIVE" ]]; then')
+          with tempfile.TemporaryDirectory(prefix='nginx-package-test-') as tmp:
+              env = dict(os.environ, WORK=tmp, DEBIAN_FRONTEND='noninteractive')
+              subprocess.run(['bash', '-c', 'set -Eeuo pipefail\nsource /etc/os-release\n' + source[begin:end]], env=env, check=True)
+          PY
       - name: Fetch and verify pinned official Xray
         env:
           XRAY_ARCH: ${{ matrix.arch }}

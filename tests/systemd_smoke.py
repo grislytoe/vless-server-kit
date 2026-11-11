@@ -70,8 +70,11 @@ def main():
     os.chmod(authdir / 'admin.json', 0o640)
     unit = (base / 'install.sh').read_text().split('cat > "$WORK/xray.service" <<\'UNIT\'\n')[1].split('\nUNIT\n')[0]
     Path('/etc/systemd/system/xray.service').write_text(unit + '\n')
+    nginx_user = re.search(r'^\s*user\s+([^\s;]+)', Path('/etc/nginx/nginx.conf').read_text(), re.M)[1]
+    nginx_group = run('id', '-gn', nginx_user).stdout.strip()
     for path in (base / 'services').glob('*.service'):
-        shutil.copyfile(path, Path('/etc/systemd/system') / path.name)
+        text = path.read_text().replace('Group=www-data\n', 'Group=' + nginx_group + '\n')
+        (Path('/etc/systemd/system') / path.name).write_text(text)
     run('systemctl', 'daemon-reload')
     try:
         run('systemctl', 'start', 'xray', 'vless-admin', 'vless-panel')
