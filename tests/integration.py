@@ -105,7 +105,10 @@ def main():
         nginx = nginx.replace("/var/www/vless-cover", root.as_posix())
         (root / "index.html").write_text("local fallback")
         nginx = ("daemon off;\nmaster_process off;\npid logs/nginx.pid;\nerror_log logs/error.log;\n"
-                 "events {}\nhttp {\naccess_log logs/access.log;\n" + nginx + "\n}\n")
+                 "events {}\nhttp {\naccess_log logs/access.log;\n"
+                 "client_body_temp_path temp/client;\nproxy_temp_path temp/proxy;\n"
+                 "fastcgi_temp_path temp/fastcgi;\nuwsgi_temp_path temp/uwsgi;\nscgi_temp_path temp/scgi;\n"
+                 + nginx + "\n}\n")
         write(root / "nginx.conf", nginx)
         prefix = root.as_posix() + "/"
         result = subprocess.run([args.nginx, "-t", "-p", prefix, "-c", "nginx.conf"], capture_output=True, text=True)

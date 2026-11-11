@@ -1,5 +1,37 @@
-# VLESS server kit
+# VPN на Ubuntu 22.04 одной командой
 
-Interactive VPN deployment for a dedicated Ubuntu 22.04 VPS with two public IPv4 addresses and a domain. Xray VLESS + XHTTP + REALITY, Nginx/Certbot and an authenticated key-management panel.
+Xray **VLESS + XHTTP + REALITY** для HAPP и веб-панель: создание, просмотр, копирование, QR, деактивация и удаление ключей. Вход в панель по логину и паролю, выбранным при установке.
 
-See [the Russian installation guide](README-RU.md) and [protocol analysis](PROTOCOL-RU.md). The launcher asks for the domain, both IP addresses, panel login and password. No live server credentials are included.
+## Требования
+
+- Чистый выделенный VPS **Ubuntu 22.04** с systemd, архитектура x86_64 или ARM64.
+- Root или пользователь с sudo. Рекомендуется от 1 ГиБ RAM и 2 ГиБ свободного диска; 2 ГиБ RAM дают больший запас.
+- **Два разных публичных IPv4**, назначенных интерфейсу VPS и маршрутизируемых хостером.
+- Домен с прямой **DNS A на первый IP**, без CDN-проксирования и без AAAA.
+- Открытые входящие **TCP 80 и 443**, сохранённый доступ SSH; исходящий HTTPS и UDP DNS.
+
+Второй адрес нужно заранее заказать и назначить у хостера, DNS — настроить у провайдера домена. На сервере с чужими Nginx/Xray/другой VPN-панелью скрипт остановится для проверки конфликтов.
+
+## Полная команда
+
+Подключитесь по SSH и выполните одну строку. Она установит curl, если его ещё нет, и запустит интерактивную установку:
+
+```bash
+sudo bash -c 'set -euo pipefail; apt-get update; apt-get install -y ca-certificates curl; curl -fsSL https://raw.githubusercontent.com/grislytoe/vless-server-kit/main/start.sh | bash'
+```
+
+Если вошли как **root** и `sudo` отсутствует:
+
+```bash
+bash -c 'set -euo pipefail; apt-get update; apt-get install -y ca-certificates curl; curl -fsSL https://raw.githubusercontent.com/grislytoe/vless-server-kit/main/start.sh | bash'
+```
+
+Параметры в команду подставлять не нужно. Скрипт покажет IPv4 интерфейсов и запросит **домен → входящий IP → второй IP → логин панели → пароль и повтор**. Пароль вводится скрыто. Весь ввод выполняется в SSH-терминале; при запуске удалённой командой используйте `ssh -t`.
+
+После проверок устанавливаются VPN, Nginx, сертификат и панель. В конце выводится **HTTPS-адрес панели**. Войдите и скопируйте ссылку или скачайте QR нужного ключа для импорта в HAPP.
+
+Запускатель скачивает закреплённую проверенную ревизию с SHA256; архив Xray также закреплён и проверяется. При повторном запуске сохраняются существующие клиенты, ключи и пароль панели. Изменение ключей перезапускает Xray: остальные устройства могут кратко переподключиться.
+
+Подробности, резервные копии и восстановление: [README-RU.md](README-RU.md). Выбор протокола и ограничения маскировки: [PROTOCOL-RU.md](PROTOCOL-RU.md). Проверки: [GitHub Actions](https://github.com/grislytoe/vless-server-kit/actions).
+
+Нераспознаваемость и максимальная скорость в любой сети не гарантируются. После установки отдельно проверьте HAPP со своего устройства. В репозитории нет действующих паролей, приватных ключей или клиентских ссылок.

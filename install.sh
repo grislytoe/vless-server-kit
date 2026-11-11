@@ -206,8 +206,10 @@ python3 "$BASE/config.py" render --settings "$STATE/settings.json" \
 "$WORK/xray" run -test -config "$WORK/render/config.json"
 install -d -m 755 /var/www/vless-cover/.well-known/acme-challenge
 install -d -m 755 /etc/nginx/conf.d
-printf '<!doctype html><html lang="en"><meta charset="utf-8"><title>Personal website</title><h1>Welcome</h1><p>Personal website.</p></html>\n' \
-    > /var/www/vless-cover/index.html
+if [[ ! -f /var/www/vless-cover/index.html ]]; then
+    printf '<!doctype html><html lang="en"><meta charset="utf-8"><title>%s</title><h1>Welcome</h1><p>Personal website.</p></html>\n' "$DOMAIN" \
+        > /var/www/vless-cover/index.html
+fi
 chmod 644 /var/www/vless-cover/index.html
 if [[ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]]; then
     python3 "$BASE/config.py" http --settings "$STATE/settings.json" --output "$WORK/http.conf"
