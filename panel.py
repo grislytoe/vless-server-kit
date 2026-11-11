@@ -86,7 +86,9 @@ def create_app(auth=None, transport=rpc):
         response.headers['Cache-Control'] = 'no-store'
         response.headers['Pragma'] = 'no-cache'
         response.headers['X-Content-Type-Options'] = 'nosniff'
-        response.headers['Referrer-Policy'] = 'no-referrer'
+        # no-referrer makes native form POSTs send Origin: null in browsers,
+        # contradicting our same-origin check. Keep referrers internal only.
+        response.headers['Referrer-Policy'] = 'same-origin'
         response.headers['X-Frame-Options'] = 'DENY'
         response.headers['Content-Security-Policy'] = (
             "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; "

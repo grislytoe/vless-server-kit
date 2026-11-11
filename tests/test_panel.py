@@ -51,6 +51,7 @@ class PanelTests(unittest.TestCase):
         response = self.get('/')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers['Cache-Control'], 'no-store')
+        self.assertEqual(response.headers['Referrer-Policy'], 'same-origin')
         self.assertIn('&lt;script&gt;', response.get_data(as_text=True))
         self.assertNotIn('<script>alert(1)</script>', response.get_data(as_text=True))
         self.assertEqual(self.post('/add', dict(csrf=self.csrf(), name='Wrong origin'),
