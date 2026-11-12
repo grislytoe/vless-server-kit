@@ -7,8 +7,18 @@ main() {
     unset PYTHONPATH PYTHONHOME
     umask 077
     die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+    UPDATE=false
+    for arg in "$@"; do
+        case "$arg" in
+            --update) UPDATE=true ;;
+            *) die "Unknown option: $arg (supported: --update)" ;;
+        esac
+    done
     [[ $EUID -eq 0 ]] || die 'Run through sudo bash or from a root SSH session.'
     [[ -d /run/systemd/system ]] || die 'A full Ubuntu/Debian VPS with systemd is required.'
+    if [[ "$UPDATE" == true ]]; then
+        [[ -f /var/lib/vless-optimized/settings.json ]] || die 'No managed VPN found; update refused.'
+    fi
     # shellcheck source=/dev/null
     source /etc/os-release
     case "$ID:$VERSION_ID" in
@@ -34,6 +44,10 @@ main() {
     tar -xzf "$WORK/kit.tar.gz" --strip-components=1 -C "$WORK"
     cd "$WORK"
     sha256sum --strict -c SHA256SUMS
+    if [[ "$UPDATE" == true ]]; then
+        bash install.sh --update
+        return
+    fi
     DOMAIN=""; INBOUND=""; OUTBOUND=""
     # shellcheck source=inputs.sh
     source "$WORK/inputs.sh"

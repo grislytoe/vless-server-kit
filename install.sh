@@ -18,17 +18,19 @@ PORT=443
 FALLBACK=26869
 XRAY_VERSION=26.11.9
 ACTION=check
+UPDATE=false
 XRAY_ARCHIVE=""
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 for arg in "$@"; do
     case "$arg" in
         --check) ACTION=check ;;
         --install) ACTION=install ;;
+        --update) ACTION=install; UPDATE=true ;;
         --archive=*) XRAY_ARCHIVE=${arg#--archive=} ;;
         --domain=*) DOMAIN=${arg#--domain=} ;;
         --inbound=*) INBOUND=${arg#--inbound=} ;;
         --outbound=*) OUTBOUND=${arg#--outbound=} ;;
-        --help|-h) printf 'Usage: sudo bash install.sh --check | --install --domain=vpn.example.com --inbound=IP1 --outbound=IP2 [--archive=/path/Xray-linux-64.zip]\n'; exit 0 ;;
+        --help|-h) printf 'Usage: sudo bash install.sh --check | --install [--domain=vpn.example.com --inbound=IP1 --outbound=IP2] [--archive=/path/Xray-linux-64.zip]\nUpdate managed VPN: sudo bash install.sh --update\n'; exit 0 ;;
         *) die "Unknown option: $arg" ;;
     esac
 done
@@ -40,6 +42,13 @@ for cmd in python3 ip ss systemctl; do command -v "$cmd" >/dev/null || die "Miss
 [[ -d /run/systemd/system ]] || die 'A Linux host with systemd is required.'
 # shellcheck source=inputs.sh
 source "$BASE/inputs.sh"
+if [[ "$UPDATE" == true ]]; then
+    [[ -z "$DOMAIN$INBOUND$OUTBOUND" ]] || die 'Update uses saved settings; omit domain/IP overrides.'
+    SAVED=$(python3 "$BASE/update_guard.py" parameters) || die 'Managed state incomplete; refusing to generate replacement credentials.'
+    mapfile -t VALUES <<< "$SAVED"
+    [[ ${#VALUES[@]} -eq 3 ]] || die 'Invalid saved network settings.'
+    DOMAIN=${VALUES[0]}; INBOUND=${VALUES[1]}; OUTBOUND=${VALUES[2]}
+fi
 collect_inputs
 # shellcheck source=/dev/null
 source /etc/os-release
@@ -154,13 +163,17 @@ trap 'exit 143' TERM
 # Also stop old releases using the legacy lock before taking snapshots.
 systemctl stop vless-panel vless-admin >/dev/null 2>&1 || true
 if [[ -f "$STATE/pending.json" ]]; then python3 "$BASE/admin.py" recover; fi
+if [[ "$UPDATE" == true ]]; then
+    python3 "$BASE/update_guard.py" capture --snapshot "$WORK/update-guard.json"
+fi
 for target in "$CONFIG" "$BIN" "$UNIT" "$SITE" \
     /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf /var/www/vless-cover/index.html \
     /etc/apt/sources.list.d/vless-nginx.list /etc/apt/preferences.d/vless-nginx \
     /usr/share/keyrings/vless-nginx.gpg \
     /etc/letsencrypt/renewal-hooks/deploy/vless-nginx \
     "$STATE/client.txt" "$STATE/client.json" "$STATE/client-qr.png" \
-    "$STATE/settings.json" "$STATE/clients.json" /etc/vless-panel/admin.json \
+    "$STATE/settings.json" "$STATE/clients.json" "$STATE/credentials.json" "$STATE/kit-version" /etc/vless-panel/admin.json \
+    /var/lib/vless-panel/security.sqlite3 \
     /etc/systemd/system/vless-admin.service /etc/systemd/system/vless-panel.service; do snapshot "$target"; done
 # Local mutations remain stopped throughout the upgrade.
 for file in config.py admin.py panel.py panel_setup.py security_state.py; do snapshot "/opt/vless-optimized/$file"; done
@@ -332,6 +345,10 @@ PANEL_PATH=$(python3 -c 'import json; print(json.load(open("/var/lib/vless-optim
 curl -fsS --connect-timeout 10 --max-time 20 --resolve "$DOMAIN:443:$INBOUND" \
     "https://$DOMAIN$PANEL_PATH/login" -o "$WORK/panel-check.html"
 certbot renew --dry-run --no-random-sleep-on-renew
+if [[ "$UPDATE" == true ]]; then
+    python3 "$BASE/update_guard.py" verify --snapshot "$WORK/update-guard.json"
+fi
+install -m 600 "$BASE/VERSION" "$STATE/kit-version"
 SUCCESS=true
 printf 'Installed. Backup: %s\nHapp link: sudo cat %s/client.txt\nQR: %s/client-qr.png\n' "$BACKUP" "$STATE" "$STATE"
 printf 'Next: import the link into Happ; verify traffic, idle reconnect and latency under load.\n'
