@@ -23,10 +23,22 @@ class PanelTests(unittest.TestCase):
         self.messages = []
         def transport(message):
             self.messages.append(message)
+            if message['action'] == 'statistics':
+                return {self.keys[0]['id']: dict(upload=123, download=456, online=True,
+                                              last_activity=1700000000, sampled=1700000000)}
             return copy.deepcopy(self.keys) if message['action'] == 'list' else {'ok': True}
         self.app = create_app(self.auth, transport)
         self.app.config['TESTING'] = True
         self.client = self.app.test_client()
+
+    def test_statistics_require_login_and_return_only_aggregates(self):
+        self.assertEqual(self.get('/statistics').status_code, 302)
+        self.login()
+        result = self.get('/statistics')
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json[self.keys[0]['id']]['upload'], 123)
+        self.assertEqual(result.headers['Cache-Control'], 'no-store')
+        self.assertNotIn('link', result.get_data(as_text=True))
 
     def get(self, path, **kwargs):
         return self.client.get(self.prefix + path, base_url='https://vpn.example.com', **kwargs)

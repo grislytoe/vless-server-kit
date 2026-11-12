@@ -42,7 +42,7 @@ def main():
     run('useradd', '--system', '--user-group', '--no-create-home', '--shell', '/usr/sbin/nologin', 'vless-panel')
     run('useradd', '--system', '--user-group', '--no-create-home', '--shell', '/usr/sbin/nologin', 'xray')
     target.mkdir(mode=0o755)
-    for name in ('config.py', 'admin.py', 'panel.py', 'panel_setup.py', 'security_state.py'):
+    for name in ('config.py', 'admin.py', 'panel.py', 'panel_setup.py', 'security_state.py', 'traffic_stats.py'):
         shutil.copyfile(base / name, target / name)
     for name in ('templates', 'static'):
         shutil.copytree(base / name, target / name)
@@ -131,6 +131,16 @@ server {{
             assert status == 200, status
             csrf = re.search(rb'name="csrf" value="([^"]+)"', html)[1].decode()
             assert request('POST', '/login', dict(csrf=csrf, username='test-admin', password=password))[0] == 303
+            for _ in range(20):
+                status, payload = request('GET', '/statistics')
+                statistics = json.loads(payload)
+                if status == 200 and c['uuid'] in statistics:
+                    break
+                time.sleep(0.5)
+            assert statistics[c['uuid']]['online'] is False, statistics
+            assert Path('/run/xray-stats').stat().st_mode & 0o777 == 0o750
+            assert run('runuser', '-u', 'vless-panel', '--', '/usr/bin/test', '!', '-r',
+                       '/run/xray-stats/api.sock').returncode == 0
             status, html = request('GET', '/')
             assert status == 200, status
             csrf = re.search(rb'name="csrf" value="([^"]+)"', html)[1].decode()
@@ -154,6 +164,7 @@ server {{
             assert request('POST', '/login', dict(csrf=csrf, username='test-admin', password=new_password))[0] == 303
             saved_auth = json.loads((authdir / 'admin.json').read_text())
             assert saved_auth['password_hash'] == password_hash(new_password, saved_auth['salt'], 32768, 3)
+            assert (state / 'traffic.sqlite3').stat().st_mode & 0o777 == 0o600
             assert (authdir / 'admin.json').stat().st_mode & 0o777 == 0o640
             run('systemctl', 'is-active', '--quiet', 'xray', 'vless-admin', 'vless-panel', 'nginx')
             print('PASS: real systemd units, nonroot panel, Unix socket permissions, Nginx HTTPS, login, add, QR, deactivate, delete.')

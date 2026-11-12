@@ -181,6 +181,14 @@ def create_app(auth=None, transport=rpc):
             abort(404)
         return jsonify(result)
 
+    @app.get(prefix + '/statistics')
+    @login_required
+    def statistics():
+        try:
+            return jsonify(transport(dict(action='statistics')))
+        except (OSError, RuntimeError):
+            return jsonify(error='Statistics unavailable'), 503
+
     @app.post(prefix + '/add')
     @login_required
     def add():

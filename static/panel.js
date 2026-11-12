@@ -10,6 +10,40 @@ document.addEventListener('click', async (event) => {
     document.getElementById('copy-status').textContent = 'Выделенная ссылка готова для копирования';
   }
 });
+
+function trafficSize(value) {
+  let size = Number(value);
+  const units = ['Б', 'КиБ', 'МиБ', 'ГиБ', 'ТиБ'];
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++; }
+  return `${size.toFixed(unit ? 2 : 0)} ${units[unit]}`;
+}
+
+async function refreshStatistics() {
+  const panel = document.getElementById('operation-status');
+  if (!panel) return;
+  try {
+    if (document.hidden) return;
+    const response = await fetch(panel.dataset.panel + 'statistics', {cache: 'no-store', credentials: 'same-origin'});
+    if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error();
+    const stats = await response.json();
+    document.querySelectorAll('[data-stats-key]').forEach(element => {
+      const value = stats[element.dataset.statsKey];
+      element.querySelector('[data-stat="online"]').textContent = element.dataset.enabled === '0' ? 'Ключ отключён' :
+        value?.online === true ? 'Есть соединения' : value?.online === false ? 'Нет соединений' : 'Данные недоступны';
+      for (const key of ['upload', 'download', 'total']) {
+        element.querySelector(`[data-stat="${key}"]`).textContent = value ? trafficSize(key === 'total' ? value.upload + value.download : value[key]) : '—';
+      }
+      element.querySelector('[data-stat="last"]').textContent = value?.last_activity ?
+        new Date(value.last_activity * 1000).toLocaleString() : 'Данных пока нет';
+    });
+  } catch {
+    document.querySelectorAll('[data-stat="online"]').forEach(element => { element.textContent = 'Данные недоступны'; });
+  } finally {
+    setTimeout(refreshStatistics, 5000);
+  }
+}
+refreshStatistics();
 document.addEventListener('submit', async (event) => {
   const message = event.target.dataset.confirm;
   if (message && !window.confirm(message)) { event.preventDefault(); return; }

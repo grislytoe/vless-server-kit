@@ -45,7 +45,7 @@ class AdminTests(unittest.TestCase):
         (self.root / 'client.txt').write_text('old link')
         self.manager._dispatch(dict(action='deactivate', id=original))
         users = json.loads(self.config.read_text())['inbounds'][0]['settings']['clients']
-        self.assertEqual(users, [dict(id=clients[1]['id'])])
+        self.assertEqual(users, [dict(id=clients[1]['id'], email=clients[1]['id'])])
         self.assertFalse((self.root / 'client.txt').exists())
         clients = self.manager._dispatch(dict(action='list'))
         self.assertEqual(clients[0]['link'], '')

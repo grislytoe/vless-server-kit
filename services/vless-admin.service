@@ -5,6 +5,7 @@ Wants=xray.service
 [Service]
 User=root
 Group=vless-admin
+SupplementaryGroups=xray
 ExecStart=/usr/bin/python3 /opt/vless-optimized/admin.py serve
 Restart=on-failure
 RestartSec=2

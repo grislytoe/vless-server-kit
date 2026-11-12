@@ -67,14 +67,17 @@ def new_credentials(xray):
         short_id=secrets.token_hex(8), path="/api/v2/session/" + secrets.token_hex(16)))
 
 
-def server_config(settings, credentials, clients=None):
+def server_config(settings, credentials, clients=None, stats_address='/run/xray-stats/api.sock'):
     s, c = validate(settings), validate_credentials(credentials)
     ids = [c["uuid"]] if clients is None else [str(uuid.UUID(v["id"])) for v in clients if v["active"]]
     return {
+        "stats": {},
+        "api": {"tag": "stats-api", "listen": stats_address, "services": ["StatsService"]},
+        "policy": {"levels": {"0": {"statsUserUplink": True, "statsUserDownlink": True, "statsUserOnline": True}}},
         "log": {"access": "none", "loglevel": "warning"},
         "inbounds": [{"tag": "vless-xhttp", "listen": s["inbound_ip"],
             "port": s["port"], "protocol": "vless",
-            "settings": {"clients": [{"id": value} for value in ids], "decryption": "none"},
+            "settings": {"clients": [{"id": value, "email": value} for value in ids], "decryption": "none"},
             "streamSettings": {"network": "xhttp", "security": "reality",
                 "realitySettings": {"show": False, "target": f"127.0.0.1:{s['fallback_port']}",
                     "xver": 1, "serverNames": [s["domain"]],

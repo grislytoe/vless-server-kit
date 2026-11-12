@@ -10,6 +10,8 @@ import socket
 import struct
 import subprocess
 import tempfile
+import threading
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -20,6 +22,7 @@ if os.name == 'posix':
 
 from config import client_url, server_config, validate, validate_credentials, write
 from panel_setup import password_hash, verify_password, write_auth
+from traffic_stats import TrafficStore, query_snapshot
 
 STATE = Path('/var/lib/vless-optimized')
 CONFIG = Path('/usr/local/etc/xray/config.json')
@@ -48,6 +51,15 @@ class Manager:
     def __init__(self, state=STATE, config=CONFIG, runner=subprocess.run, auth_path='/etc/vless-panel/admin.json'):
         self.state, self.config, self.runner = Path(state), Path(config), runner
         self.auth_path = Path(auth_path)
+        self.thread_lock = threading.RLock()
+
+    def collect_stats(self):
+        store = TrafficStore(self.state / 'traffic.sqlite3')
+        try:
+            epoch, values = query_snapshot()
+            store.collect([c['id'] for c in self.initialize()], epoch, values)
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            store.failed()
 
     def initialize(self):
         target = self.state / 'clients.json'
@@ -77,6 +89,7 @@ class Manager:
         transaction = self.state / 'pending.json'
         write(transaction, dict(config=load(self.config), clients=self.initialize()))
         try:
+            self.collect_stats()
             self._install_config(new_config)
             # Restart deliberately closes existing streams, so revocation is immediate.
             self.runner(['systemctl', 'restart', 'xray'], check=True, capture_output=True, timeout=30)
@@ -97,6 +110,10 @@ class Manager:
             transaction.unlink()
 
     def dispatch(self, request):
+        with self.thread_lock:
+            return self._locked_dispatch(request)
+
+    def _locked_dispatch(self, request):
         fd = os.open('/run/vless-optimized-lock/install.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, 'a') as lock:
             try:
@@ -106,6 +123,11 @@ class Manager:
             return self._dispatch(request)
 
     def _dispatch(self, request):
+        if request.get('action') == 'collect_stats':
+            self.collect_stats()
+            return dict(ok=True)
+        if request.get('action') == 'statistics':
+            return TrafficStore(self.state / 'traffic.sqlite3').read()
         if request.get('action') == 'change_password':
             current, password = request.get('current_password'), request.get('new_password')
             if not isinstance(current, str) or not isinstance(password, str) or not 16 <= len(password) <= 256 or len(current) > 256:
@@ -154,6 +176,14 @@ def serve():
     manager = Manager()
     manager.recover()
     manager.initialize()
+    def collect_loop():
+        while True:
+            try:
+                manager.dispatch(dict(action='collect_stats'))
+            except Exception:
+                print('Statistics sample unavailable.', flush=True)
+            time.sleep(5)
+    threading.Thread(target=collect_loop, daemon=True).start()
     Path(SOCKET).unlink(missing_ok=True)
     with socket.socket(socket.AF_UNIX) as listener:
         listener.bind(SOCKET)
@@ -186,11 +216,13 @@ def serve():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['init', 'serve', 'recover'])
+    parser.add_argument('command', choices=['init', 'serve', 'recover', 'collect'])
     command = parser.parse_args().command
     if command == 'serve':
         serve()
     elif command == 'recover':
         Manager().recover()
+    elif command == 'collect':
+        Manager().collect_stats()
     else:
         Manager().initialize()

@@ -34,9 +34,13 @@ def main():
     auth = dict(username='browser-test', salt=salt, secret=secrets.token_hex(32),
                 password_hash=password_hash(password, salt), domain=f'127.0.0.1:{port}', panel_path=prefix)
     clients = []
+    traffic = [1048576]
     def transport(message):
         if message['action'] == 'list':
             return clients
+        if message['action'] == 'statistics':
+            return {v['id']: dict(upload=traffic[0], download=2097152, online=v['active'],
+                                 last_activity=1794470400, sampled=1794470400) for v in clients}
         if message['action'] == 'add':
             key_id = str(uuid.uuid4())
             credentials = dict(uuid=key_id, private_key=secrets.token_urlsafe(32), public_key=secrets.token_urlsafe(32),
@@ -118,6 +122,10 @@ def main():
                             download = page.get_by_role('link', name='Скачать QR')
                             assert download.is_visible()
                             assert len(clients) == 1
+                            expect(page.locator('[data-stat="online"]')).to_have_text('Есть соединения', timeout=15000)
+                            expect(page.locator('[data-stat="total"]')).to_have_text('3.00 МиБ')
+                            traffic[0] = 2097152
+                            expect(page.locator('[data-stat="total"]')).to_have_text('4.00 МиБ', timeout=15000)
                             page.once('dialog', lambda dialog: dialog.accept())
                             page.get_by_role('button', name='Деактивировать', exact=True).click()
                             expect(page.locator('.badge')).to_have_text('Отключён')
@@ -163,7 +171,7 @@ def main():
         finally:
             server.shutdown()
             server.server_close()
-    print('PASS: native login, lost mutation response, live add/deactivate/delete without navigation, scan rendered QR thumbnail, logout.')
+    print('PASS: native login, lost mutation response, live CRUD and statistics without navigation, scan rendered QR thumbnail, logout.')
 
 
 if __name__ == '__main__':

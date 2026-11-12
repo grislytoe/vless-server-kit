@@ -162,6 +162,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 # Also stop old releases using the legacy lock before taking snapshots.
 systemctl stop vless-panel vless-admin >/dev/null 2>&1 || true
+if [[ -f "$STATE/clients.json" ]]; then python3 "$BASE/admin.py" collect; fi
 if [[ -f "$STATE/pending.json" ]]; then python3 "$BASE/admin.py" recover; fi
 if [[ "$UPDATE" == true ]]; then
     python3 "$BASE/update_guard.py" capture --snapshot "$WORK/update-guard.json"
@@ -172,11 +173,11 @@ for target in "$CONFIG" "$BIN" "$UNIT" "$SITE" \
     /usr/share/keyrings/vless-nginx.gpg \
     /etc/letsencrypt/renewal-hooks/deploy/vless-nginx \
     "$STATE/client.txt" "$STATE/client.json" "$STATE/client-qr.png" \
-    "$STATE/settings.json" "$STATE/clients.json" "$STATE/credentials.json" "$STATE/kit-version" /etc/vless-panel/admin.json \
+    "$STATE/settings.json" "$STATE/clients.json" "$STATE/credentials.json" "$STATE/kit-version" "$STATE/traffic.sqlite3" /etc/vless-panel/admin.json \
     /var/lib/vless-panel/security.sqlite3 \
     /etc/systemd/system/vless-admin.service /etc/systemd/system/vless-panel.service; do snapshot "$target"; done
 # Local mutations remain stopped throughout the upgrade.
-for file in config.py admin.py panel.py panel_setup.py security_state.py; do snapshot "/opt/vless-optimized/$file"; done
+for file in config.py admin.py panel.py panel_setup.py security_state.py traffic_stats.py; do snapshot "/opt/vless-optimized/$file"; done
 for file in "$BASE"/templates/*.html "$BASE"/static/*; do snapshot "/opt/vless-optimized/${file#"$BASE/"}"; done
 python3 - "$STATE/settings.json" <<'PY'
 import json, secrets, sys
@@ -286,6 +287,9 @@ StartLimitBurst=10
 [Service]
 User=xray
 Group=xray
+RuntimeDirectory=xray-stats
+RuntimeDirectoryMode=0750
+UMask=0007
 ExecStart=/usr/local/bin/xray run -config /usr/local/etc/xray/config.json
 Restart=on-failure
 RestartSec=2
@@ -325,7 +329,7 @@ then
     chmod 600 "$STATE/client-qr.png"
 fi
 install -d -m 755 /opt/vless-optimized /opt/vless-optimized/templates /opt/vless-optimized/static
-for file in config.py admin.py panel.py panel_setup.py security_state.py; do install -m 644 "$BASE/$file" "/opt/vless-optimized/$file"; done
+for file in config.py admin.py panel.py panel_setup.py security_state.py traffic_stats.py; do install -m 644 "$BASE/$file" "/opt/vless-optimized/$file"; done
 install -m 644 "$BASE"/templates/*.html /opt/vless-optimized/templates/
 install -m 644 "$BASE"/static/* /opt/vless-optimized/static/
 install -m 644 "$BASE"/services/*.service /etc/systemd/system/

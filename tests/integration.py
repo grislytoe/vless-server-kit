@@ -21,6 +21,7 @@ import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config import DEFAULTS, client_config, new_credentials, nginx_config, server_config, write
 from probe import available_port, wait_port, udp_probe
+from traffic_stats import TrafficStore, query_snapshot
 
 
 PAYLOAD = bytes(range(256)) * 16384  # 4 MiB, exact digest checked in both directions.
@@ -163,14 +164,17 @@ def main():
             dns_port = dns.server_address[1]
             socks = available_port()
             clients = [dict(id=c['uuid'], active=True), dict(id=other['uuid'], active=True)]
-            server_cfg = server_config(s, c, clients)
+            api_port = available_port()
+            server_cfg = server_config(s, c, clients, stats_address=f'127.0.0.1:{api_port}')
             # Test-only: permit this exact loopback target. Production keeps Xray's
             # default private-network protection and has no such override.
             server_cfg["outbounds"][0]["settings"] = {"finalRules": [
                 {"action": "allow", "ip": ["127.0.0.1"], "port": http_port},
                 {"action": "allow", "ip": ["127.0.0.1"], "port": dns_port}]}
             write(root / "server.json", server_cfg)
-            write(root / "client.json", client_config(s, c, socks_port=socks, address=s["inbound_ip"]))
+            client_cfg = client_config(s, c, socks_port=socks, address=s["inbound_ip"])
+            client_cfg['outbounds'][0]['sendThrough'] = '127.0.0.2'
+            write(root / "client.json", client_cfg)
             server = start(stack, [args.xray, "run", "-config", str(root / "server.json")], log)
             wait_port(s["port"], server)
             client = start(stack, [args.xray, "run", "-config", str(root / "client.json")], log)
@@ -187,6 +191,22 @@ def main():
             again = subprocess.run(curl + [f"http://localhost:{http_port}/data"], capture_output=True, check=True).stdout
             assert again == PAYLOAD
             assert SOURCES and set(SOURCES) == {"127.0.0.2"}, SOURCES
+            def sample():
+                return query_snapshot(args.xray, address=f'127.0.0.1:{api_port}', epoch_reader=lambda: str(server.pid))
+            store = TrafficStore(root / 'traffic.sqlite3')
+            epoch, values = sample()
+            store.collect([c['uuid'], other['uuid']], epoch, values)
+            initial = store.read()[c['uuid']]
+            assert initial['upload'] >= len(PAYLOAD) and initial['download'] >= 2 * len(PAYLOAD), initial
+            assert other['uuid'] not in values, 'Traffic was attributed to an unused key'
+            held = start(stack, curl + ['--limit-rate', '64k', '--max-time', '4', url], log)
+            for _ in range(10):
+                time.sleep(0.1)
+                _, online_values = sample()
+                if online_values.get(c['uuid'], {}).get('online'):
+                    break
+            assert online_values[c['uuid']]['online'] > 0
+            stop(held)
             udp_probe(socks, resolvers=('127.0.0.1',), dns_port=dns_port)
             private = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
             stack.callback(private.server_close)
@@ -210,16 +230,28 @@ def main():
             wait_port(other_port, other_process)
             other_curl = [v.replace(str(socks), str(other_port)) for v in curl]
             assert subprocess.run(other_curl + [url], capture_output=True, check=True).stdout == PAYLOAD
+            epoch, values = sample()
+            store.collect([c['uuid'], other['uuid']], epoch, values)
+            before_restart = store.read()
+            assert before_restart[other['uuid']]['download'] >= len(PAYLOAD)
             stop(server)
-            server_cfg['inbounds'][0]['settings']['clients'] = [dict(id=c['uuid'])]
+            server_cfg['inbounds'][0]['settings']['clients'] = [dict(id=c['uuid'], email=c['uuid'])]
             write(root / 'server.json', server_cfg)
             server = start(stack, [args.xray, 'run', '-config', str(root / 'server.json')], log)
             wait_port(s['port'], server)
             denied = subprocess.run(other_curl + ['--max-time', '4', url], capture_output=True)
             assert denied.returncode != 0, 'Revoked client still connects'
             assert subprocess.run(curl + [url], capture_output=True, check=True).stdout == PAYLOAD
+            epoch, values = sample()
+            store = TrafficStore(root / 'traffic.sqlite3')
+            store.collect([c['uuid'], other['uuid']], epoch, values)
+            after_restart = store.read()
+            assert after_restart[c['uuid']]['download'] >= before_restart[c['uuid']]['download'] + len(PAYLOAD)
+            assert after_restart[other['uuid']]['download'] == before_restart[other['uuid']]['download']
+            assert after_restart[other['uuid']]['online'] is False
             print("PASS: real Nginx config, TLS1.3/H2, wrong SNI rejection, real XHTTP/REALITY,")
             print("4 MiB download + upload, UDP, private destination denial, two clients, revocation rejected, remaining client works, outbound source IP.")
+            print('PASS: per-key traffic, online detection, durable counters across Xray restart and revoked-key history.')
         except Exception:
             log.flush()
             print((root / "process.log").read_text(errors="replace"), file=sys.stderr)
