@@ -33,7 +33,7 @@ main() {
         apt-get update
         apt-get install -y ca-certificates curl python3 iproute2 util-linux tar coreutils
     fi
-    # Development 1.1 snapshot; verified on Linux, not promoted to main/release.
+    # Release snapshot: promoted only after real Linux service/browser checks pass.
     REVISION=1aea9e17e03415f4b04f9203a61d8bdf463eacdb
     ARCHIVE_SHA256=6a8477cfed00da3ab5318a3f456f20e9a147656b47992fd048a46ec37f137c7f
     WORK=$(mktemp -d /tmp/vless-release.XXXXXXXX)
