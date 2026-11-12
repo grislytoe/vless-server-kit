@@ -8,17 +8,17 @@
 <section><h2>Новое подключение</h2><form class="add" action="{{ url_for('add') }}" method="post">
 <input type="hidden" name="csrf" value="{{ session.csrf }}"><label>Название устройства<input name="name" maxlength="80" placeholder="Например, домашний ПК" required></label><button>Создать ключ</button></form>
 <p class="muted small">Каждое изменение ключей перезапускает VPN. Подключённые устройства могут переподключиться.</p></section>
-<div class="keys">{% for client in clients %}<article><div class="key-heading"><h2>{{ client.name }}</h2><span class="badge {% if not client.active %}inactive{% endif %}">{{ 'Активен' if client.active else 'Отключён' }}</span></div>
-<p class="muted small">Создан: {{ client.created[:19] | replace('T', ' ') }} UTC</p>
+<div class="keys">{% for client in clients %}<article><div class="key-main"><div class="key-heading"><h2>{{ client.name }}</h2><span class="badge {% if not client.active %}inactive{% endif %}">{{ 'Активен' if client.active else 'Отключён' }}</span></div>
+<p class="muted small created">Создан: {{ client.created[:19] | replace('T', ' ') }} UTC</p>
 <div class="traffic-stats" data-stats-key="{{ client.id }}" data-enabled="{{ '1' if client.active else '0' }}">
-<p>Соединение: <strong data-stat="online">Данные недоступны</strong></p>
-<p>Получено: <span data-stat="download">—</span> · Отправлено: <span data-stat="upload">—</span> · Всего: <span data-stat="total">—</span></p>
-<p class="muted small">Последняя активность: <span data-stat="last">Данных пока нет</span></p>
+<p class="connection-state">Соединение: <strong data-stat="online">Данные недоступны</strong></p>
+<dl class="traffic-values"><div><dt>Получено</dt><dd data-stat="download">—</dd></div><div><dt>Отправлено</dt><dd data-stat="upload">—</dd></div><div><dt>Всего</dt><dd data-stat="total">—</dd></div></dl>
+<p class="muted small last-activity">Последняя активность: <span data-stat="last">Данных пока нет</span></p>
 </div>
 {% if client.active %}<label>Ссылка для HAPP<input class="link" readonly id="key-{{ client.id }}" value="{{ client.link }}"></label>
 <div class="actions"><button class="secondary" type="button" data-copy="key-{{ client.id }}">Копировать ссылку</button></div>
-<div class="actions qr-actions"><img class="qr-preview" src="{{ url_for('qr', key_id=client.id, preview='1') }}" alt="QR подключения {{ client.name }}" loading="lazy"><a class="button secondary" href="{{ url_for('qr', key_id=client.id) }}">Скачать QR</a></div>{% endif %}
-<div class="actions">{% if client.active %}<form method="post" action="{{ url_for('update', key_id=client.id, action='deactivate') }}" data-confirm="Отключить этот ключ? Подключённые устройства потеряют доступ."><input type="hidden" name="csrf" value="{{ session.csrf }}"><button class="danger">Деактивировать</button></form>{% endif %}
+{% endif %}
+<div class="actions key-controls">{% if client.active %}<form method="post" action="{{ url_for('update', key_id=client.id, action='deactivate') }}" data-confirm="Отключить этот ключ? Подключённые устройства потеряют доступ."><input type="hidden" name="csrf" value="{{ session.csrf }}"><button class="danger">Деактивировать</button></form>{% endif %}
 <form method="post" action="{{ url_for('update', key_id=client.id, action='delete') }}" data-confirm="Удалить ключ навсегда? Доступ будет отозван."><input type="hidden" name="csrf" value="{{ session.csrf }}"><button class="danger">Удалить</button></form></div>
-</article>{% else %}<section><h2>Ключей пока нет</h2><p>Создайте первое подключение выше.</p></section>{% endfor %}</div>
+</div>{% if client.active %}<aside class="actions qr-actions"><p class="qr-caption">Подключение в HAPP</p><img class="qr-preview" src="{{ url_for('qr', key_id=client.id, preview='1') }}" alt="QR подключения {{ client.name }}" loading="lazy"><a class="button secondary" href="{{ url_for('qr', key_id=client.id) }}">Скачать QR</a></aside>{% endif %}</article>{% else %}<section><h2>Ключей пока нет</h2><p>Создайте первое подключение выше.</p></section>{% endfor %}</div>
 <p id="copy-status" role="status" aria-live="polite"></p>{% endblock %}
